@@ -1,0 +1,43 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: chess_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: chessrag
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    container_name: chess_redis
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: chess_rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672" # Management UI dashboard
+
+  ml-engine:
+    build: ./services/ml-engine
+    container_name: ml-engine
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/chessrag
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      GOOGLE_API_KEY: YOUR_GEMINI_API_KEY
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+
+volumes:
+  pgdata:

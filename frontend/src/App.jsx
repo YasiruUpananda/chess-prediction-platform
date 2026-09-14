@@ -17,27 +17,53 @@ export default function App() {
   const [context, setContext] = useState('');
   const [prediction, setPrediction] = useState('');
   const [loading, setLoading] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState('');
 
   // --- Chessboard Logic ---
-  function makeAMove(move) {
-    const gameCopy = new Chess(game.fen());
+  async function fetchMovePrediction(newFen) {
     try {
-      const result = gameCopy.move(move);
-      setGame(gameCopy);
-      return result;
-    } catch (error) {
-      return null;
+      const response = await axios.post('http://localhost:8000/api/v1/predict-move', {
+        fen: newFen,
+        opponent_username: opponentName || "Opponent"
+      });
+      
+      const aiMove = response.data.san_move;
+      setAiSuggestion(`AI Predicted Move: ${aiMove} (${response.data.suggested_move})`);
+      
+      // Automatically execute the AI's counter-move on the board
+      setGame((currentGame) => {
+        const gameCopy = new Chess(currentGame.fen());
+        try {
+          gameCopy.move(aiMove);
+          return gameCopy;
+        } catch (e) {
+          console.error("Failed to apply AI move:", e);
+          return currentGame;
+        }
+      });
+    } catch (err) {
+      console.error("Move prediction error:", err);
     }
   }
 
   function onDrop(sourceSquare, targetSquare) {
-    const move = makeAMove({
-      from: sourceSquare,
-      to: targetSquare,
-      promotion: 'q',
-    });
+    const gameCopy = new Chess(game.fen());
+    let moveResult = null;
     
-    if (move === null) return false;
+    try {
+      moveResult = gameCopy.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: 'q',
+      });
+    } catch (error) {
+      return false; 
+    }
+
+    if (moveResult === null) return false;
+
+    setGame(gameCopy);
+    fetchMovePrediction(gameCopy.fen());
     return true;
   }
 
@@ -79,6 +105,11 @@ export default function App() {
             customDarkSquareStyle={{ backgroundColor: '#779556' }} 
             customLightSquareStyle={{ backgroundColor: '#ebecd0' }} 
           />
+          {aiSuggestion && (
+            <div style={{ marginTop: '1rem', padding: '0.75rem', backgroundColor: '#0f3460', borderRadius: '4px', textAlign: 'center' }}>
+              <strong>{aiSuggestion}</strong>
+            </div>
+          )}
         </div>
 
         {/* Right Column: Prediction Form & Results */}
