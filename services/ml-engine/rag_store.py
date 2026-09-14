@@ -1,7 +1,11 @@
+import os
+
 from langchain_postgres import PGVector
 from langchain_huggingface import HuggingFaceEmbeddings
 
-CONNECTION_STRING = "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/chess_rag_db"
+CONNECTION_STRING = os.getenv("DATABASE_URL")
+if not CONNECTION_STRING:
+    raise ValueError("DATABASE_URL environment variable is not set!")
 COLLECTION_NAME = "chess_games_vector"
 
 def get_vector_store():

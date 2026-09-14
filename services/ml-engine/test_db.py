@@ -1,7 +1,10 @@
+import os
+
 from sqlalchemy import create_engine, text
 
-# Explicitly use the modern psycopg v3 driver format
-DB_URL = "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/chess_rag_db"
+CONNECTION_STRING = os.getenv("DATABASE_URL")
+if not CONNECTION_STRING:
+    raise ValueError("DATABASE_URL environment variable is not set!")
 
 try:
     engine = create_engine(DB_URL)

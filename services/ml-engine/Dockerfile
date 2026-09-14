@@ -6,7 +6,8 @@ WORKDIR /app
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# UPDATED: Added timeout cushion and forced CPU-only PyTorch downloads
+RUN pip install --no-cache-dir --default-timeout=1000 -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Copy the application code
 COPY . .
