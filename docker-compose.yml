@@ -33,11 +33,25 @@ services:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/chessrag
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      GOOGLE_API_KEY: YOUR_GEMINI_API_KEY
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}g
     depends_on:
       - db
       - redis
       - rabbitmq
+
+  ml-worker:
+    build: ./services/ml-engine
+    container_name: ml-worker
+    command: python worker.py
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/chessrag
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+    depends_on:
+      - rabbitmq
+      - db
+      - redis
 
 volumes:
   pgdata:

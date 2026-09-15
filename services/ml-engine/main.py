@@ -6,6 +6,7 @@ from dotenv import find_dotenv, load_dotenv
 # Automatically find and load .env from the current or parent directory
 load_dotenv(find_dotenv())
 
+import pika
 import chess
 import torch
 import redis.asyncio as aioredis
@@ -155,6 +156,39 @@ async def predict_move(request: MovePredictionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- RabbitMQ Producer Setup ---
+RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+
+def publish_pgn_task(filename: str):
+    try:
+        params = pika.URLParameters(RABBITMQ_URL)
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        channel.queue_declare(queue='pgn_ingestion_queue', durable=True)
+        
+        message = json.dumps({"filename": filename})
+        channel.basic_publish(
+            exchange='',
+            routing_key='pgn_ingestion_queue',
+            body=message,
+            properties=pika.BasicProperties(delivery_mode=2) # make message persistent
+        )
+        connection.close()
+        return True
+    except Exception as e:
+        print(f"Failed to publish task: {e}")
+        return false
+
+class IngestRequest(BaseModel):
+    filename: str
+
+@app.post("/api/v1/ingest-async")
+def trigger_ingest(request: IngestRequest):
+    """Triggers an asynchronous PGN ingestion task via RabbitMQ."""
+    success = publish_pgn_task(request.filename)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to queue background task.")
+    return {"status": "Accepted", "message": f"Dataset {request.filename} queued for background processing."}
 
 @app.post("/api/v1/predict-strategy", response_model=StrategyPredictionResponse)
 def predict_strategy(request: StrategyPredictionRequest):

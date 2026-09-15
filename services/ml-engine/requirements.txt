@@ -10,3 +10,4 @@ langchain-postgres
 langchain-huggingface
 langchain-google-genai
 psycopg2-binary
+pika>=1.3.0

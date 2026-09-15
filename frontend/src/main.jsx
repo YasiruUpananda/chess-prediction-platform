@@ -2,6 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { AuthProvider } from "@asgardeo/auth-react";
+import { Provider } from 'react-redux';
+import { store } from './store/store';
 
 const config = {
     signInRedirectURL: "http://localhost:5173",
@@ -13,8 +15,10 @@ const config = {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <AuthProvider config={config}>
-      <App />
-    </AuthProvider>
+    <Provider store={store}>
+      <AuthProvider config={config}>
+        <App />
+      </AuthProvider>
+    </Provider>
   </React.StrictMode>,
 )
