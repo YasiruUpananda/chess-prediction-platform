@@ -21,8 +21,8 @@ from predict_opponent import generate_chess_prediction
 
 # --- FastAPI Initialization ---
 app = FastAPI(
-    title="Chess ML Engine",
-    description="Unified API with Redis caching, PyTorch, and RAG strategy analysis",
+    title="Neuro Chess ML Engine",
+    description="Unified API with Redis caching, PyTorch neural networks, and RAG strategy analysis",
     version="1.0.0",
 )
 
@@ -61,6 +61,18 @@ async def shutdown_event():
 # --- PyTorch Model Setup ---
 model = ChessOpponentPredictor()
 model.eval()
+
+# --- Helper Function for FEN to Tensor ---
+def fen_to_tensor(board: chess.Board):
+    """Converts a chess board into a 64-element PyTorch tensor."""
+    piece_values = {
+        "P": 1, "N": 3, "B": 3, "R": 5, "Q": 9, "K": 10,
+        "p": -1, "n": -3, "b": -3, "r": -5, "q": -9, "k": -10
+    }
+    tensor = torch.zeros(64)
+    for square, piece in board.piece_map().items():
+        tensor[square] = piece_values.get(piece.symbol(), 0)
+    return tensor.unsqueeze(0) # Reshape to (1, 64) for the neural network
 
 # --- Pydantic Request & Response Schemas ---
 class MovePredictionRequest(BaseModel):
@@ -125,12 +137,12 @@ async def predict_move(request: MovePredictionRequest):
                 cached_res["cached"] = True
                 return cached_res
 
-        # Tensor evaluation via PyTorch
-        dummy_tensor = torch.randn(1, 64)
+        # REAL Tensor evaluation via PyTorch
+        board_tensor = fen_to_tensor(board)
         with torch.no_grad():
-            probabilities = model(dummy_tensor)
+            probabilities = model(board_tensor)
 
-        # Select candidate legal move
+        # Select candidate legal move (safely picking the first one until trained)
         selected_move = legal_moves[0]
         san = board.san(selected_move)
         uci = selected_move.uci()
@@ -177,7 +189,7 @@ def publish_pgn_task(filename: str):
         return True
     except Exception as e:
         print(f"Failed to publish task: {e}")
-        return false
+        return False
 
 class IngestRequest(BaseModel):
     filename: str

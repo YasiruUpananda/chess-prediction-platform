@@ -44,10 +44,12 @@ services:
     container_name: ml-worker
     command: python worker.py
     environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/chessrag
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/chessrag
       REDIS_URL: redis://redis:6379/0
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+    volumes:
+      - ./services/ml-engine/data:/app/data
     depends_on:
       - rabbitmq
       - db

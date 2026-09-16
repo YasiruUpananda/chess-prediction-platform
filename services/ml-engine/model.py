@@ -7,11 +7,13 @@ class ChessOpponentPredictor(nn.Module):
         # Simple feed-forward neural network for stylistic move preference classification
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.relu = nn.ReLU()
-        self.fc2 = hidden_dim, hidden_dim
-        self.fc_out = nn.Linear(hidden_dim, output_dim) # Represents possible move space classes
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim) 
+        self.fc_out = nn.Linear(hidden_dim, output_dim) 
 
     def forward(self, x):
         out = self.fc1(x)
+        out = self.relu(out)
+        out = self.fc2(out) 
         out = self.relu(out)
         out = self.fc_out(out)
         return torch.softmax(out, dim=-1)

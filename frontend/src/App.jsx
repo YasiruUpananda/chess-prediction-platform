@@ -113,8 +113,12 @@ export default function App() {
   return (
     <div style={styles.container}>
       {/* Header */}
-      <h1 style={styles.header}>Chess Prediction Engine</h1>
-      <p style={styles.subheader}>Enterprise Microservices Stack: PyTorch, Redis, RabbitMQ & RAG AI</p>
+      <header className="p-4 border-b">
+        <h1 className="text-2xl font-bold tracking-tight">Neuro Chess</h1>
+        <p className="text-sm text-gray-500">
+          AI-Powered Opponent Prediction & Strategy Platform
+        </p>
+      </header>
 
       {/* Main Two-Column Layout */}
       <div style={styles.layout}>
