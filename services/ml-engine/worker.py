@@ -1,184 +1,134 @@
-import os
+﻿import hashlib
 import json
-import hashlib
-import time
 import logging
+import os
+import random
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-import chess.pgn
-import pika
-import psycopg2
-from psycopg2.extras import execute_values
-from langchain_core.documents import Document
-from rag_store import get_vector_store
 
-DATABASE_URL = os.getenv("WORKER_DATABASE_URL")
-RABBITMQ_URL = os.getenv("RABBITMQ_URL")
+import chess.pgn
+
+from database import connect, init_db
+from task_queue import QUEUE, RETRY_QUEUE, connection, finish, setup
+
 PGN_DATA_DIR = Path(os.getenv("PGN_DATA_DIR", "/app/data")).resolve()
+HEALTH_FILE = Path("/tmp/ingestion-heartbeat")
 logger = logging.getLogger("neuro_chess.worker")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 
-def resolve_pgn_path(filename: str) -> Path:
+def resolve_pgn_path(filename):
+    if not isinstance(filename, str) or not filename:
+        raise ValueError("A PGN filename is required")
     requested = Path(filename)
     candidate = (PGN_DATA_DIR / requested.name).resolve()
     if requested.name != filename or candidate.parent != PGN_DATA_DIR or candidate.suffix.lower() != ".pgn":
         raise ValueError("Ingestion accepts only PGN filenames inside PGN_DATA_DIR")
     return candidate
 
-def get_db_connection():
-    """Connects to PostgreSQL with retry logic."""
-    if not DATABASE_URL:
-        raise RuntimeError("WORKER_DATABASE_URL must be configured")
-    while True:
-        try:
-            conn = psycopg2.connect(DATABASE_URL)
-            return conn
-        except Exception as e:
-            logger.warning("PostgreSQL unavailable; retrying in 2 seconds (%s)", type(e).__name__)
-            time.sleep(2)
 
-def init_db():
-    """Creates the games and positions tables if they do not exist."""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    # Table to store unique positions and moves played by specific players
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS player_moves (
-            id SERIAL PRIMARY KEY,
-            player_name VARCHAR(255) NOT NULL,
-            color VARCHAR(10) NOT NULL,
-            fen TEXT NOT NULL,
-            move_played VARCHAR(20) NOT NULL,
-            san VARCHAR(20) NOT NULL,
-            tournament VARCHAR(255),
-            result VARCHAR(10)
-        );
-        CREATE INDEX IF NOT EXISTS idx_player_fen ON player_moves (player_name, fen);
-        CREATE INDEX IF NOT EXISTS idx_player_position ON player_moves (
-            lower(player_name), split_part(fen, ' ', 1), split_part(fen, ' ', 2), split_part(fen, ' ', 3)
-        );
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
-    print("Database tables verified.")
+def game_identity(game):
+    canonical = json.dumps({"headers": dict(sorted(game.headers.items())),
+        "fen": game.board().fen(), "moves": [move.uci() for move in game.mainline_moves()]}, sort_keys=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
-def process_pgn(filename: str):
-    """Parses a PGN file and bulk-inserts player moves into PostgreSQL."""
-    file_path = resolve_pgn_path(filename)
-    if not file_path.is_file():
-        raise FileNotFoundError(f"PGN file not found: {filename}")
 
-    conn = get_db_connection()
-    cur = conn.cursor()
+def process_pgn(filename):
+    from langchain_core.documents import Document
+    from rag_store import get_vector_store
 
-    records = []
-    documents = []
-    document_ids = []
-    vector_store = None
-    games_parsed = 0
+    path = resolve_pgn_path(filename)
+    count = 0
+    with path.open(encoding="utf-8", errors="replace") as pgn_file:
+        while (game := chess.pgn.read_game(pgn_file)) is not None:
+            if game.errors:
+                raise ValueError("PGN contains invalid moves; correct the file before retrying")
+            if not any(game.mainline_moves()):
+                continue
+            digest = game_identity(game)
+            white, black = game.headers.get("White", "Unknown"), game.headers.get("Black", "Unknown")
+            with connect() as db:
+                db.execute("INSERT INTO ingested_games(id, white, black) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                           (digest, white, black))
+                indexed = db.execute("SELECT indexed FROM ingested_games WHERE id=%s", (digest,)).fetchone()[0]
+                if indexed:
+                    count += 1
+                    continue
+                board = game.board()
+                rows = []
+                for ply, move in enumerate(game.mainline_moves(), 1):
+                    rows.append((white if board.turn else black, "white" if board.turn else "black",
+                        board.fen(), move.uci(), board.san(move), game.headers.get("Event", "Unknown"),
+                        game.headers.get("Result", "*"), digest, ply))
+                    board.push(move)
+                with db.cursor() as cursor:
+                    cursor.executemany("""INSERT INTO player_moves
+                        (player_name,color,fen,move_played,san,tournament,result,game_id,ply)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (game_id,ply) DO NOTHING""", rows)
+            document = Document(
+                page_content=game.accept(chess.pgn.StringExporter(headers=True, variations=False, comments=False)),
+                metadata={"white": white, "black": black, "white_normalized": white.strip().casefold(),
+                          "black_normalized": black.strip().casefold(), "game_id": digest})
+            # Stable vector IDs make a crash before the indexed flag safe to retry.
+            get_vector_store().add_documents([document], ids=[digest])
+            with connect() as db:
+                db.execute("UPDATE ingested_games SET indexed=true WHERE id=%s", (digest,))
+            count += 1
+    if not count:
+        raise ValueError("PGN contains no playable games")
+    logger.info("Verified %d indexed games from %s", count, path.name)
+    return count
 
-    with open(file_path, "r", encoding="utf-8", errors="replace") as pgn_file:
-        while True:
-            game = chess.pgn.read_game(pgn_file)
-            if game is None:
-                break
 
-            white = game.headers.get("White", "Unknown")
-            black = game.headers.get("Black", "Unknown")
-            event = game.headers.get("Event", "Unknown Tournament")
-            result = game.headers.get("Result", "*")
+def decode_task(body):
+    data = json.loads(body)
+    if not isinstance(data, dict):
+        raise ValueError("Expected a job object")
+    resolve_pgn_path(data.get("filename"))
+    return data["filename"]
 
-            exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)
-            pgn_text = game.accept(exporter)
-            digest = hashlib.sha256(pgn_text.encode("utf-8")).hexdigest()
-            documents.append(Document(
-                page_content=pgn_text,
-                metadata={"white": white, "black": black, "event": event, "result": result},
-            ))
-            document_ids.append(digest)
-
-            board = game.board()
-            for move in game.mainline_moves():
-                player = white if board.turn == chess.WHITE else black
-                color = "white" if board.turn == chess.WHITE else "black"
-                fen = board.fen()
-                san = board.san(move)
-                uci = move.uci()
-
-                records.append((player, color, fen, uci, san, event, result))
-                board.push(move)
-
-            games_parsed += 1
-
-            # Batch insert every 500 records to keep memory lean
-            if len(records) >= 500:
-                execute_values(
-                    cur,
-                    """
-                    INSERT INTO player_moves 
-                    (player_name, color, fen, move_played, san, tournament, result) 
-                    VALUES %s
-                    """,
-                    records
-                )
-                conn.commit()
-                records = []
-
-            if len(documents) >= 32:
-                if vector_store is None:
-                    vector_store = get_vector_store()
-                vector_store.add_documents(documents, ids=document_ids)
-                documents = []
-                document_ids = []
-
-    # Insert remaining records
-    if records:
-        execute_values(
-            cur,
-            """
-            INSERT INTO player_moves 
-            (player_name, color, fen, move_played, san, tournament, result) 
-            VALUES %s
-            """,
-            records
-        )
-        conn.commit()
-
-    if documents:
-        if vector_store is None:
-            vector_store = get_vector_store()
-        vector_store.add_documents(documents, ids=document_ids)
-
-    cur.close()
-    conn.close()
-    logger.info("Processed %d PGN games from %s", games_parsed, file_path.name)
-
-def on_message(ch, method, properties, body):
-    data = json.loads(body.decode("utf-8"))
-    filename = data.get("filename", "")
-    try:
-        process_pgn(filename)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-    except Exception:
-        logger.exception("PGN ingestion failed for %r", filename)
-        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
 def main():
-    if not RABBITMQ_URL:
-        raise RuntimeError("RABBITMQ_URL must be configured")
-    init_db()
-    params = pika.URLParameters(RABBITMQ_URL)
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
+    delay = 1
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        while True:
+            try:
+                init_db()
+                with connection() as conn:
+                    channel = conn.channel()
+                    setup(channel)
+                    channel.basic_qos(prefetch_count=1)
+                    logger.info("Ingestion worker connected")
+                    delay = 1
+                    while conn.is_open:
+                        HEALTH_FILE.touch()
+                        method, properties, body = channel.basic_get(QUEUE, auto_ack=False)
+                        if method is None:
+                            method, properties, body = channel.basic_get(RETRY_QUEUE, auto_ack=False)
+                            if method is not None:
+                                conn.sleep(10)
+                        if method is None:
+                            conn.process_data_events(time_limit=1)
+                            continue
+                        error = None
+                        try:
+                            future = pool.submit(process_pgn, decode_task(body))
+                            while not future.done():
+                                conn.process_data_events(time_limit=1)
+                                HEALTH_FILE.touch()
+                            future.result()
+                        except Exception as exc:
+                            logger.exception("Ingestion job failed")
+                            error = exc
+                        attempts = int((properties.headers or {}).get("attempts", 0))
+                        finish(channel, method.delivery_tag, body, attempts, error)
+            except Exception as exc:
+                HEALTH_FILE.unlink(missing_ok=True)
+                logger.warning("Worker disconnected (%s); retrying in %ss", type(exc).__name__, delay)
+                time.sleep(delay + random.random())
+                delay = min(delay * 2, 30)
 
-    channel.queue_declare(queue="pgn_ingestion_queue", durable=True)
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue="pgn_ingestion_queue", on_message_callback=on_message)
-
-    logger.info("PGN ingestion worker started")
-    channel.start_consuming()
 
 if __name__ == "__main__":
     main()

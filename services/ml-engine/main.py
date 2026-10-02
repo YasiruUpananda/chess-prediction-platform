@@ -10,7 +10,6 @@ from typing import Any, Optional
 
 import chess
 import fitz
-import pika
 import pytesseract
 import redis.asyncio as aioredis
 import psycopg
@@ -26,6 +25,8 @@ load_dotenv(find_dotenv())
 
 from predict_opponent import generate_chess_prediction
 from token_auth import require_asgardeo_user
+from database import init_db
+from task_queue import enqueue
 
 logger = logging.getLogger("neuro_chess.api")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -54,6 +55,7 @@ redis_client = None
 @app.on_event("startup")
 async def startup_event():
     global redis_client
+    await asyncio.to_thread(init_db)
     try:
         redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
         await redis_client.ping()
@@ -269,38 +271,10 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- RabbitMQ Producer Setup ---
-RABBITMQ_URL = os.getenv("RABBITMQ_URL")
-
-def publish_pgn_task(filename: str):
-    connection = None
-    try:
-        if not RABBITMQ_URL:
-            raise RuntimeError("RABBITMQ_URL must be configured")
-        params = pika.URLParameters(RABBITMQ_URL)
-        connection = pika.BlockingConnection(params)
-        channel = connection.channel()
-        channel.queue_declare(queue='pgn_ingestion_queue', durable=True)
-        
-        message = json.dumps({"filename": filename})
-        channel.basic_publish(
-            exchange='',
-            routing_key='pgn_ingestion_queue',
-            body=message,
-            properties=pika.BasicProperties(delivery_mode=2) # make message persistent
-        )
-        return True
-    except Exception:
-        logger.exception("Failed to queue PGN ingestion")
-        return False
-    finally:
-        if connection and connection.is_open:
-            connection.close()
-
 class IngestRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
 
-@app.post("/api/v1/ingest-async")
+@app.post("/api/v1/ingest-async", status_code=202)
 def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Triggers an asynchronous PGN ingestion task via RabbitMQ."""
     data_dir = Path(os.getenv("PGN_DATA_DIR", "/app/data")).resolve()
@@ -310,9 +284,11 @@ def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(requi
     if candidate.suffix.lower() != ".pgn" or not candidate.is_file():
         raise HTTPException(status_code=404, detail="PGN file not found in the approved data directory.")
 
-    success = publish_pgn_task(candidate.name)
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to queue background task.")
+    try:
+        enqueue(candidate.name)
+    except Exception as error:
+        logger.warning("Ingestion queue unavailable (%s)", type(error).__name__)
+        raise HTTPException(status_code=503, detail="Ingestion queue is unavailable or full. Retry shortly.") from error
     return {"status": "Accepted", "message": f"Dataset {request.filename} queued for background processing."}
 
 @app.post("/api/v1/predict-strategy", response_model=StrategyPredictionResponse)
