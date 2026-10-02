@@ -152,9 +152,14 @@ def cache_write(key,result):
     try: report_cache().setex(key,3600,json.dumps(result))
     except Exception: pass
 
+@traced('supporting_games')
 def supporting_games(player,context,ids):
-    docs = get_vector_store().similarity_search(f'{player}. {context}',k=6,filter={'$and':[
-        {'game_id':{'$in':ids}}, {'$or':[{'white_normalized':{'$eq':player}}, {'black_normalized':{'$eq':player}}]}]})
+    if os.getenv('VECTOR_SEARCH_MODE', 'exact') == 'hnsw':
+        from vector_search import search
+        docs = search(get_vector_store(), f'{player}. {context}', player, ids)
+    else:
+        docs = get_vector_store().similarity_search(f'{player}. {context}',k=6,filter={'$and':[
+            {'game_id':{'$in':ids}}, {'$or':[{'white_normalized':{'$eq':player}}, {'black_normalized':{'$eq':player}}]}]})
     unique = {}
     for doc in docs:
         game_id = doc.metadata.get('game_id')
@@ -191,7 +196,8 @@ async def strategy_events(opponent_name,context='',color='any'):
             yield {'type':'statistics','statistics':statistics,'available_games':len(ids)}
             model_name = os.getenv('GOOGLE_MODEL','gemini-3.8-flash')
             key = 'strategy:' + hashlib.sha256(json.dumps([player,context.strip(),color,version,model_name,
-                PROMPT_VERSION,os.getenv('EMBEDDING_MODEL','sentence-transformers/all-MiniLM-L6-v2')]).encode()).hexdigest()
+                PROMPT_VERSION,os.getenv('EMBEDDING_MODEL','sentence-transformers/all-MiniLM-L6-v2'),
+                os.getenv('VECTOR_SEARCH_MODE','exact')]).encode()).hexdigest()
             cached = await asyncio.to_thread(cache_read,key)
             if cached:
                 yield {'type':'complete','result':cached}

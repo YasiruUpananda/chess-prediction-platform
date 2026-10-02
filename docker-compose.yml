@@ -175,7 +175,7 @@ services:
     ports: []
     healthcheck:
       disable: true
-    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "-v"]
+    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "-v"]
 
   db-backup:
     image: postgres:16-alpine
