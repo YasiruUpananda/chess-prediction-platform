@@ -25,6 +25,9 @@ def init_db():
             );
             ALTER TABLE player_moves ADD COLUMN IF NOT EXISTS game_id TEXT;
             ALTER TABLE player_moves ADD COLUMN IF NOT EXISTS ply INTEGER;
+            ALTER TABLE player_moves ADD COLUMN IF NOT EXISTS position_key TEXT;
+            CREATE INDEX IF NOT EXISTS idx_player_canonical_position
+                ON player_moves(lower(trim(player_name)), position_key);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_game_ply ON player_moves(game_id, ply);
             CREATE INDEX IF NOT EXISTS idx_player_position ON player_moves (
                 lower(player_name), split_part(fen, ' ', 1),
@@ -38,3 +41,18 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_ocr_status ON ocr_jobs(status, created_at);
         """)
+        # Older rows were written with legal FENs; normalize legal EP state too.
+        import chess
+        from chess_positions import position_key
+        pending = db.execute("SELECT id,fen FROM player_moves WHERE position_key IS NULL").fetchall()
+        updates = []
+        for row_id, fen in pending:
+            try:
+                board = chess.Board(fen)
+            except ValueError:
+                continue
+            if board.is_valid():
+                updates.append((position_key(board), row_id))
+        if updates:
+            with db.cursor() as cursor:
+                cursor.executemany("UPDATE player_moves SET position_key=%s WHERE id=%s", updates)

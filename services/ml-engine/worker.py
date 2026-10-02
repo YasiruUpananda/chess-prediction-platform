@@ -10,6 +10,7 @@ from pathlib import Path
 import chess.pgn
 
 from database import connect, init_db
+from chess_positions import position_key
 from task_queue import QUEUE, RETRY_QUEUE, connection, finish, setup
 
 PGN_DATA_DIR = Path(os.getenv("PGN_DATA_DIR", "/app/data")).resolve()
@@ -60,12 +61,12 @@ def process_pgn(filename):
                 for ply, move in enumerate(game.mainline_moves(), 1):
                     rows.append((white if board.turn else black, "white" if board.turn else "black",
                         board.fen(), move.uci(), board.san(move), game.headers.get("Event", "Unknown"),
-                        game.headers.get("Result", "*"), digest, ply))
+                        game.headers.get("Result", "*"), digest, ply, position_key(board)))
                     board.push(move)
                 with db.cursor() as cursor:
                     cursor.executemany("""INSERT INTO player_moves
-                        (player_name,color,fen,move_played,san,tournament,result,game_id,ply)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (game_id,ply) DO NOTHING""", rows)
+                        (player_name,color,fen,move_played,san,tournament,result,game_id,ply,position_key)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (game_id,ply) DO NOTHING""", rows)
             document = Document(
                 page_content=game.accept(chess.pgn.StringExporter(headers=True, variations=False, comments=False)),
                 metadata={"white": white, "black": black, "white_normalized": white.strip().casefold(),
