@@ -7,6 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=120 -r requirements.txt
 
+COPY install_stockfish.py /tmp/install_stockfish.py
+RUN pip install --no-cache-dir "httpx>=0.27,<1"
+RUN python /tmp/install_stockfish.py
+
 COPY . .
 
 EXPOSE 8000
