@@ -1,20 +1,23 @@
 import os
+from functools import lru_cache
 
 from langchain_postgres import PGVector
 from langchain_huggingface import HuggingFaceEmbeddings
 
-CONNECTION_STRING = os.getenv("DATABASE_URL")
-if not CONNECTION_STRING:
-    raise ValueError("DATABASE_URL environment variable is not set!")
 COLLECTION_NAME = "chess_games_vector"
 
+@lru_cache(maxsize=1)
 def get_vector_store():
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    
+    connection_string = os.getenv("DATABASE_URL")
+    if not connection_string:
+        raise RuntimeError("DATABASE_URL environment variable is not set")
+
+    model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name=model_name)
     vector_store = PGVector(
         embeddings=embeddings,
         collection_name=COLLECTION_NAME,
-        connection=CONNECTION_STRING,
+        connection=connection_string,
         use_jsonb=True,
     )
     return vector_store

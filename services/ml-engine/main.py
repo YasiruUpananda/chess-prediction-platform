@@ -261,10 +261,13 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- RabbitMQ Producer Setup ---
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL")
 
 def publish_pgn_task(filename: str):
+    connection = None
     try:
+        if not RABBITMQ_URL:
+            raise RuntimeError("RABBITMQ_URL must be configured")
         params = pika.URLParameters(RABBITMQ_URL)
         connection = pika.BlockingConnection(params)
         channel = connection.channel()
@@ -277,19 +280,28 @@ def publish_pgn_task(filename: str):
             body=message,
             properties=pika.BasicProperties(delivery_mode=2) # make message persistent
         )
-        connection.close()
         return True
-    except Exception as e:
-        print(f"Failed to publish task: {e}")
+    except Exception:
+        logger.exception("Failed to queue PGN ingestion")
         return False
+    finally:
+        if connection and connection.is_open:
+            connection.close()
 
 class IngestRequest(BaseModel):
-    filename: str
+    filename: str = Field(min_length=1, max_length=255)
 
 @app.post("/api/v1/ingest-async")
 def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Triggers an asynchronous PGN ingestion task via RabbitMQ."""
-    success = publish_pgn_task(request.filename)
+    data_dir = Path(os.getenv("PGN_DATA_DIR", "/app/data")).resolve()
+    candidate = (data_dir / request.filename).resolve()
+    if Path(request.filename).name != request.filename or candidate.parent != data_dir:
+        raise HTTPException(status_code=400, detail="Only PGN filenames inside the approved data directory are accepted.")
+    if candidate.suffix.lower() != ".pgn" or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="PGN file not found in the approved data directory.")
+
+    success = publish_pgn_task(candidate.name)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to queue background task.")
     return {"status": "Accepted", "message": f"Dataset {request.filename} queued for background processing."}
@@ -298,6 +310,8 @@ def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(requi
 def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Generates an in-depth strategic analysis using Gemini and PostgreSQL (pgvector)."""
     try:
+        if not os.getenv("GOOGLE_API_KEY"):
+            raise HTTPException(status_code=503, detail="Strategy analysis is not configured. Set GOOGLE_API_KEY.")
         # Construct the context query
         query = f"{request.opponent_name}. {request.context}".strip()
 
@@ -309,4 +323,8 @@ def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] =
             strategy_analysis=analysis_result,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"RAG Engine Error: {str(e)}")
+        if isinstance(e, HTTPException):
+            raise
+        logger.exception("Strategy analysis failed")
+        raise HTTPException(status_code=500, detail="Strategy analysis failed. Check the service logs.") from e
+

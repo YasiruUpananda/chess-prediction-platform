@@ -11,7 +11,7 @@ def generate_chess_prediction(opponent_query: str):
     retriever = vector_store.as_retriever(search_kwargs={"k": 2})
 
     # 2. Set up the Gemini LLM (Using the fast, free-tier eligible Flash model)
-    llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0.3)
+    llm = ChatGoogleGenerativeAI(model=os.getenv("GOOGLE_MODEL", "gemini-3.8-flash"), temperature=0.3)
 
     # 3. Define the prompt template
     template = """You are an expert chess grandmaster and AI prediction analyst. 
