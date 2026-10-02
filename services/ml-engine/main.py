@@ -1,26 +1,28 @@
 import asyncio
 import json
 import logging
-import math
 import os
 from uuid import UUID
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 import chess
 import redis.asyncio as aioredis
-import psycopg
 from dotenv import find_dotenv, load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 # Automatically find and load .env from the current or parent directory
 load_dotenv(find_dotenv())
 
-from predict_opponent import generate_chess_prediction, InsufficientGameData, StrategyNotConfigured
-from database import init_db
+from predict_opponent import (generate_chess_prediction, strategy_events, StrategyReport,
+                              InsufficientGameData, StrategyNotConfigured, StrategyBusy, StrategyProviderUnavailable)
+from database import init_db, connect
+from chess_positions import position_key, validated_board
+from prediction_model import score_legal_moves, combine_history_and_heuristic, PRIOR_STRENGTH
+from engine_pool import pool as engine_pool
 from task_queue import enqueue
 import ocr_jobs
 from token_auth import require_asgardeo_user
@@ -53,6 +55,7 @@ redis_client = None
 async def startup_event():
     global redis_client
     await asyncio.to_thread(init_db)
+    app.state.embedding_warmup = asyncio.create_task(asyncio.to_thread(warm_embeddings))
     try:
         redis_client = aioredis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=0.25, socket_timeout=0.25, retry_on_timeout=False)
         await asyncio.wait_for(redis_client.ping(), timeout=0.3)
@@ -62,6 +65,9 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    if hasattr(app.state, "embedding_warmup"):
+        app.state.embedding_warmup.cancel()
+    await asyncio.to_thread(engine_pool.close)
     if redis_client:
         await redis_client.aclose()
 
@@ -69,128 +75,72 @@ async def shutdown_event():
 class MovePredictionRequest(BaseModel):
     fen: str = Field(min_length=10, max_length=120)
     opponent_username: Optional[str] = Field(default="Opponent", max_length=120)
+    initial_fen: Optional[str] = Field(default=None, min_length=10, max_length=120)
+    moves: Optional[list[str]] = Field(default=None, max_length=1500)
 
 
 class MovePredictionResponse(BaseModel):
     success: bool
     opponent: str
     fen: str
-    top_predicted_move: str
-    san_move: str
-    suggested_move: str
+    top_predicted_move: Optional[str] = None
+    san_move: Optional[str] = None
+    suggested_move: Optional[str] = None
     confidence: float
     confidence_type: str = "relative_heuristic"
     prediction_source: str = "position_heuristic"
     cached: Optional[bool] = False
+    matching_games: int = 0
+    observed_games: int = 0
+    history_weight: float = 0
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    engine: dict[str, Any] = Field(default_factory=dict)
+    game_over: bool = False
+    outcome: Optional[str] = None
+    draw_claim_available: bool = False
+    history_verified: bool = False
 
 
 class StrategyPredictionRequest(BaseModel):
     opponent_name: str = Field(min_length=1, max_length=120)
     context: str = Field(default="", max_length=2000)
+    color: Literal["any", "white", "black"] = "any"
 
 
 class StrategyPredictionResponse(BaseModel):
     opponent: str
-    strategy_analysis: str
+    report: StrategyReport
+    sources: list[dict[str, Any]]
+    statistics: list[dict[str, Any]]
     supporting_games: int
     available_games: int
+    cached: bool = False
+    data_version: str
+    model: str
+    prompt_version: str
+    context: str = ""
+    color: str = "any"
 
 
-PIECE_VALUES = {
-    chess.PAWN: 1.0,
-    chess.KNIGHT: 3.0,
-    chess.BISHOP: 3.2,
-    chess.ROOK: 5.0,
-    chess.QUEEN: 9.0,
-    chess.KING: 0.0,
-}
-CENTER_SQUARES = (chess.D4, chess.E4, chess.D5, chess.E5)
+def warm_embeddings():
+    try:
+        from rag_store import get_vector_store
+        get_vector_store().embeddings.embed_query("chess opening")
+        logger.info("Embedding model warmed")
+    except Exception:
+        logger.exception("Embedding warmup failed; retrieval will retry on demand")
 
 
-def score_legal_moves(board: chess.Board) -> list[tuple[chess.Move, float]]:
-    """Rank legal moves with a small, transparent one-ply positional heuristic."""
-    mover = board.turn
-    ranked = []
-    for move in board.legal_moves:
-        moved_piece = board.piece_at(move.from_square)
-        if moved_piece is None:
-            continue
-
-        captured_piece = board.piece_at(move.to_square)
-        if board.is_en_passant(move):
-            captured_piece = chess.Piece(chess.PAWN, not mover)
-        score = PIECE_VALUES[captured_piece.piece_type] * 0.8 if captured_piece else 0.0
-
-        if move.promotion:
-            score += PIECE_VALUES[move.promotion] - PIECE_VALUES[chess.PAWN]
-
-        before_distance = min(chess.square_distance(move.from_square, center) for center in CENTER_SQUARES)
-        after_distance = min(chess.square_distance(move.to_square, center) for center in CENTER_SQUARES)
-        score += (before_distance - after_distance) * 0.035
-
-        next_board = board.copy(stack=False)
-        next_board.push(move)
-        if next_board.is_check():
-            score += 0.25
-        if board.is_castling(move):
-            score += 0.2
-
-        destination_piece = next_board.piece_at(move.to_square)
-        if destination_piece and next_board.is_attacked_by(not mover, move.to_square):
-            attackers = len(next_board.attackers(not mover, move.to_square))
-            defenders = len(next_board.attackers(mover, move.to_square))
-            if attackers > defenders:
-                score -= PIECE_VALUES[destination_piece.piece_type] * 0.55
-
-        ranked.append((move, score))
-    return ranked
-
-
-def relative_move_preferences(scored_moves: list[tuple[chess.Move, float]]) -> list[tuple[chess.Move, float]]:
-    """Normalize heuristic rankings; values are not empirical win probabilities."""
-    if not scored_moves:
-        return []
-    temperature = 0.7
-    max_score = max(score for _, score in scored_moves)
-    weights = [math.exp((score - max_score) / temperature) for _, score in scored_moves]
-    total = sum(weights)
-    return [(scored_moves[index][0], weights[index] / total) for index in range(len(weights))]
-
-
-def find_historical_move_counts(player_name: str, fen: str) -> dict[str, int]:
-    """Read exact-position move frequencies for a player from ingested PGNs."""
-    database_url = os.getenv("WORKER_DATABASE_URL") or os.getenv("DATABASE_URL", "")
-    database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
-    if not database_url or not player_name or player_name == "Opponent":
-        return {}
-    with psycopg.connect(database_url, connect_timeout=3) as connection:
-        rows = connection.execute(
-            """SELECT move_played, COUNT(*) AS times_played
-               FROM player_moves
-               WHERE lower(player_name) = lower(%s)
-                 AND split_part(fen, ' ', 1) = split_part(%s, ' ', 1)
-                 AND split_part(fen, ' ', 2) = split_part(%s, ' ', 2)
-                 AND split_part(fen, ' ', 3) = split_part(%s, ' ', 3)
-               GROUP BY move_played""",
-            (player_name, fen, fen, fen),
-        ).fetchall()
-    return {move_uci: count for move_uci, count in rows}
-
-
-def combine_history_and_heuristic(
-    scored_moves: list[tuple[chess.Move, float]], historical_counts: dict[str, int],
-) -> list[tuple[chess.Move, float]]:
-    heuristic = relative_move_preferences(scored_moves)
-    if not historical_counts:
-        return heuristic
-    legal_history = {move.uci(): historical_counts.get(move.uci(), 0) for move, _ in scored_moves}
-    total_history = sum(legal_history.values())
-    if not total_history:
-        return heuristic
-    return [
-        (move, 0.9 * legal_history[move.uci()] / total_history + 0.1 * heuristic_probability)
-        for (move, _), (_, heuristic_probability) in zip(scored_moves, heuristic)
-    ]
+def find_historical_move_counts(player_name, fen):
+    key = position_key(chess.Board(fen))
+    with connect() as db:
+        rows = db.execute("""SELECT move_played, count(*) FROM (
+            SELECT DISTINCT ON (p.game_id) p.move_played FROM player_moves p
+            JOIN ingested_games g ON g.id=p.game_id
+            WHERE g.indexed AND lower(trim(p.player_name))=%s AND p.position_key=%s
+            ORDER BY p.game_id,p.ply
+        ) samples GROUP BY move_played""", (player_name.strip().casefold(), key)).fetchall()
+    return dict(rows)
 
 
 # --- Endpoints ---
@@ -207,20 +157,36 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/api/v1/players")
+def available_players(_user: dict[str, Any] = Depends(require_asgardeo_user)):
+    with connect() as db:
+        rows = db.execute("""SELECT min(name), count(DISTINCT id) FROM (
+            SELECT id,trim(white) AS name FROM ingested_games WHERE indexed
+            UNION ALL SELECT id,trim(black) AS name FROM ingested_games WHERE indexed
+        ) players WHERE name NOT IN ('Unknown','?','') GROUP BY lower(name) ORDER BY lower(name)""").fetchall()
+    return {"players": [{"name": name, "games": count} for name, count in rows]}
+
+
 @app.post("/api/v1/predict-move", response_model=MovePredictionResponse)
 async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Rank legal moves with a transparent heuristic and optional Redis cache."""
     try:
         try:
-            board = chess.Board(request.fen)
+            board = validated_board(request.fen, request.initial_fen, request.moves)
         except ValueError as error:
-            raise HTTPException(status_code=400, detail="Invalid FEN position.") from error
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
         if board.is_game_over():
-            raise HTTPException(status_code=400, detail="Game is already over.")
+            return {"success": True, "opponent": request.opponent_username or "Opponent",
+                    "fen": board.fen(), "confidence": 0, "game_over": True,
+                    "outcome": board.outcome().termination.name.lower().replace("_", " "),
+                    "history_verified": request.moves is not None}
 
         opponent = request.opponent_username or "Opponent"
-        cache_key = f"move:v2:{opponent.casefold()}:{board.fen()}"
+        import hashlib
+        history_signature = hashlib.sha256(json.dumps([board.root().fen(), [m.uci() for m in board.move_stack],
+                                                       board.fen()]).encode()).hexdigest()
+        cache_key = f"move:v3:{opponent.strip().casefold()}:{history_signature}:{request.moves is not None}"
         if redis_client:
             try:
                 cached_data = await asyncio.wait_for(redis_client.get(cache_key), timeout=0.3)
@@ -241,7 +207,10 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
         if not preferences:
             raise HTTPException(status_code=400, detail="No legal moves available.")
 
-        selected_move, preference = max(preferences, key=lambda item: item[1])
+        preferences.sort(key=lambda item: (-item[1], item[0].uci()))
+        selected_move, preference = preferences[0]
+        matching_games = sum(historical_counts.get(move.uci(), 0) for move, _ in preferences)
+        engine = await asyncio.to_thread(engine_pool.analyse, board, selected_move)
         used_opponent_history = any(historical_counts.get(move.uci(), 0) for move, _ in scored_moves)
         san = board.san(selected_move)
         uci = selected_move.uci()
@@ -254,13 +223,21 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
             "san_move": san,
             "suggested_move": uci,
             "confidence": round(preference, 4),
-            "confidence_type": "historical_frequency" if used_opponent_history else "relative_heuristic",
+            "confidence_type": "smoothed_move_estimate" if used_opponent_history else "relative_heuristic",
             "prediction_source": "opponent_history" if used_opponent_history else "position_heuristic",
             "cached": False,
+            "matching_games": matching_games,
+            "observed_games": historical_counts.get(uci, 0),
+            "history_weight": matching_games / (matching_games + PRIOR_STRENGTH),
+            "candidates": [{"san": board.san(move), "uci": move.uci(), "probability": probability,
+                            "observed_games": historical_counts.get(move.uci(), 0)} for move, probability in preferences[:3]],
+            "engine": engine,
+            "draw_claim_available": board.can_claim_draw(),
+            "history_verified": request.moves is not None,
         }
 
         # Brief TTL lets newly ingested history become visible quickly.
-        if redis_client:
+        if redis_client and engine.get("status") == "available":
             try:
                 await asyncio.wait_for(redis_client.setex(cache_key, 60, json.dumps(response_data)), timeout=0.3)
             except Exception as error:
@@ -293,20 +270,47 @@ def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(requi
     return {"status": "Accepted", "message": f"Dataset {request.filename} queued for background processing."}
 
 @app.post("/api/v1/predict-strategy", response_model=StrategyPredictionResponse)
-def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
+async def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Generates an in-depth strategic analysis using Gemini and PostgreSQL (pgvector)."""
     try:
-        analysis_result = generate_chess_prediction(request.opponent_name, request.context)
-        return StrategyPredictionResponse(opponent=request.opponent_name, **analysis_result)
+        analysis_result = await asyncio.wait_for(asyncio.to_thread(
+            generate_chess_prediction, request.opponent_name, request.context, request.color), timeout=75)
+        return StrategyPredictionResponse(**analysis_result)
     except InsufficientGameData as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except StrategyNotConfigured as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+    except StrategyProviderUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except StrategyBusy as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+    except TimeoutError as error:
+        raise HTTPException(status_code=504, detail="Strategy report deadline exceeded. Retry shortly.") from error
     except Exception as e:
         if isinstance(e, HTTPException):
             raise
         logger.exception("Strategy analysis failed")
         raise HTTPException(status_code=500, detail="Strategy analysis failed. Check the service logs.") from e
+
+
+@app.post("/api/v1/predict-strategy/stream")
+async def stream_strategy(request: StrategyPredictionRequest,
+                          _user: dict[str, Any] = Depends(require_asgardeo_user)):
+    async def events():
+        try:
+            async for event in strategy_events(request.opponent_name, request.context, request.color):
+                yield json.dumps(event) + "\n"
+        except InsufficientGameData as error:
+            yield json.dumps({"type": "error", "code": "insufficient_evidence", "detail": str(error)}) + "\n"
+        except (StrategyNotConfigured, StrategyBusy, StrategyProviderUnavailable) as error:
+            yield json.dumps({"type": "error", "code": "unavailable", "detail": str(error)}) + "\n"
+        except TimeoutError:
+            yield json.dumps({"type": "error", "code": "timeout", "detail": "Strategy report deadline exceeded. Retry shortly."}) + "\n"
+        except Exception:
+            logger.exception("Streaming strategy failed")
+            yield json.dumps({"type": "error", "code": "generation_failed", "detail": "Could not validate or generate a cited report. Retry shortly."}) + "\n"
+    return StreamingResponse(events(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
 @app.post("/api/v1/extract-page-moves", status_code=202)
 async def extract_page_moves(

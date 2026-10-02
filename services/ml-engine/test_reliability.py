@@ -15,6 +15,11 @@ import worker
 
 
 class ReliabilityTests(unittest.TestCase):
+    def setUp(self):
+        engine = patch.object(main.engine_pool, 'analyse', return_value={'status': 'available'})
+        engine.start()
+        self.addCleanup(engine.stop)
+
     def test_cache_outages_do_not_break_predictions(self):
         for cache in [SimpleNamespace(get=AsyncMock(side_effect=ConnectionError()),
                                       setex=AsyncMock(side_effect=ConnectionError())),
@@ -33,7 +38,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertTrue(result['success'])
 
     def test_empty_evidence_never_calls_model(self):
-        with patch.object(predict_opponent, 'evidence_count', return_value=0), patch.object(predict_opponent, 'ChatGoogleGenerativeAI') as model:
+        with patch.object(predict_opponent, 'evidence_count', return_value=0), patch.object(predict_opponent, 'report_chain') as model:
             with self.assertRaises(predict_opponent.InsufficientGameData):
                 predict_opponent.generate_chess_prediction('Nobody')
             model.assert_not_called()
@@ -41,7 +46,7 @@ class ReliabilityTests(unittest.TestCase):
     def test_api_reports_insufficient_evidence(self):
         with patch.object(main, 'generate_chess_prediction', side_effect=predict_opponent.InsufficientGameData('Insufficient game data')):
             with self.assertRaises(HTTPException) as error:
-                main.predict_strategy(main.StrategyPredictionRequest(opponent_name='Nobody'), {})
+                asyncio.run(main.predict_strategy(main.StrategyPredictionRequest(opponent_name='Nobody'), {}))
         self.assertEqual(error.exception.status_code, 422)
 
     def test_retry_is_confirmed_before_ack_and_bounded(self):
