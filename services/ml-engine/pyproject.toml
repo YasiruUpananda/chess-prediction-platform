@@ -2,7 +2,7 @@
 name = "neuro-chess-backend"
 version = "2.1.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["chess==1.10.0", "python-dotenv==1.0.1", "psycopg[binary,pool]>=3.3,<4", "opentelemetry-sdk>=1.30,<2", "opentelemetry-exporter-otlp-proto-http>=1.30,<2"]
+dependencies = ["chess==1.10.0", "python-dotenv==1.0.1", "psycopg[binary,pool]>=3.3,<4", "opentelemetry-sdk>=1.30,<2", "opentelemetry-exporter-otlp-proto-http>=1.30,<2", "prometheus-client>=0.22,<1"]
 
 [project.optional-dependencies]
 api = [

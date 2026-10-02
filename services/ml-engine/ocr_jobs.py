@@ -5,6 +5,7 @@ from uuid import uuid4
 from database import connect
 from telemetry import carrier
 from psycopg.types.json import Jsonb
+from metrics import OCR_QUEUE
 
 
 class QueueFull(Exception):
@@ -65,9 +66,13 @@ def claim():
             (status='queued' AND created_at < now() - interval '15 minutes')""",
             (int(os.getenv("OCR_TIMEOUT_SECONDS", "45")) + 60,))
         db.execute("DELETE FROM ocr_jobs WHERE finished_at < now() - interval '1 hour'")
-        return db.execute("""UPDATE ocr_jobs SET status='running', started_at=now()
+        job = db.execute("""UPDATE ocr_jobs SET status='running', started_at=now()
             WHERE id=(SELECT id FROM ocr_jobs WHERE status='queued' ORDER BY created_at
-                      FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,page,pdf,trace_context""").fetchone()
+                      FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,page,pdf,trace_context,
+                      EXTRACT(EPOCH FROM started_at-created_at)""").fetchone()
+        if job:
+            OCR_QUEUE.observe(float(job[4]))
+            return job[:4]
 
 
 def finish(job_id, result=None, error=None):

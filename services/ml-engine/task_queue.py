@@ -50,4 +50,6 @@ def finish(channel, delivery_tag, body, attempts, error, trace_headers=None):
         destination = DEAD_QUEUE if permanent or attempts + 1 >= MAX_ATTEMPTS else RETRY_QUEUE
         # Only acknowledge after the replacement has been confirmed.
         publish(channel, destination, body, attempts + 1, trace_headers)
+        from metrics import JOBS
+        JOBS.labels('ingestion','dead_lettered' if destination == DEAD_QUEUE else 'retried').inc()
     channel.basic_ack(delivery_tag=delivery_tag)

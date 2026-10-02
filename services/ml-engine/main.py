@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 import chess
 import redis.asyncio as aioredis
 from dotenv import find_dotenv, load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -30,7 +30,9 @@ from token_auth import require_asgardeo_user
 from operations import report_user, ocr_user, move_user, ingestion_user, require_ingestion_permission
 from backend_health import readiness
 from fastapi.responses import JSONResponse
+from metrics import ApiMeasurements, CACHE, authorized
 from studies import router as studies_router
+from browser_metrics import router as browser_metrics_router
 
 logger = logging.getLogger("neuro_chess.api")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -52,6 +54,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(studies_router)
+app.include_router(browser_metrics_router)
+app.add_middleware(ApiMeasurements)
+
+
+@app.get('/metrics', include_in_schema=False)
+def metric_snapshot(request: Request):
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+    from fastapi.responses import Response
+    if not os.getenv('METRICS_TOKEN'):
+        raise HTTPException(503,detail='Metrics are disabled.')
+    if not authorized(request.headers.get('Authorization','')):
+        raise HTTPException(401,detail='Metrics authentication required.')
+    from metrics import refresh_operational
+    refresh_operational()
+    return Response(generate_latest(),media_type=CONTENT_TYPE_LATEST)
 
 from telemetry import configure
 configure('neuro-chess-api')
@@ -305,9 +322,14 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
                 if cached_data:
                     cached_res = MovePredictionResponse(**json.loads(cached_data)).model_dump()
                     cached_res["cached"] = True
+                    CACHE.labels('move','hit').inc()
                     return cached_res
+                CACHE.labels('move','miss').inc()
             except Exception as error:
+                CACHE.labels('move','error').inc()
                 logger.warning("Cache read skipped (%s)", type(error).__name__)
+        else:
+            CACHE.labels('move','disabled').inc()
 
         scored_moves = await asyncio.to_thread(score_legal_moves, board)
         try:

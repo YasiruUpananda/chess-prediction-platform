@@ -1,4 +1,23 @@
 services:
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 512m
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=7d", "--storage.tsdb.retention.size=1GB"]
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./.runtime/metrics-token:/run/secrets/metrics-token:ro
+      - prometheusdata:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   jaeger:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.21.0
     profiles: [observability]
@@ -70,6 +89,10 @@ services:
       RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_MODEL: ${GOOGLE_MODEL:-gemini-3.8-flash}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      ENABLE_BROWSER_METRICS: ${ENABLE_BROWSER_METRICS:-false}
+      GEMINI_INPUT_USD_PER_MILLION: ${GEMINI_INPUT_USD_PER_MILLION:-}
+      GEMINI_OUTPUT_USD_PER_MILLION: ${GEMINI_OUTPUT_USD_PER_MILLION:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_TRACES_SAMPLE_RATIO: ${OTEL_TRACES_SAMPLE_RATIO:-0.25}
       VECTOR_SEARCH_MODE: ${VECTOR_SEARCH_MODE:-exact}
@@ -123,6 +146,7 @@ services:
       PGN_DATA_DIR: /app/data
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_TRACES_SAMPLE_RATIO: ${OTEL_TRACES_SAMPLE_RATIO:-0.25}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       DB_POOL_MAX: 2
       VECTOR_DB_POOL_MAX: 2
       OMP_NUM_THREADS: 1
@@ -155,6 +179,7 @@ services:
       OCR_MAX_PIXELS: ${OCR_MAX_PIXELS:-16000000}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_TRACES_SAMPLE_RATIO: ${OTEL_TRACES_SAMPLE_RATIO:-0.25}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
       DB_POOL_MAX: 2
     depends_on:
       db:
@@ -176,7 +201,7 @@ services:
     ports: []
     healthcheck:
       disable: true
-    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "-v"]
+    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "test_product", "test_measurements", "-v"]
 
   db-backup:
     image: postgres:16-alpine
@@ -203,6 +228,7 @@ services:
       retries: 3
 
 volumes:
+  prometheusdata:
   pgdata:
   rabbitmqdata:
   modelcache:

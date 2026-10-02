@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
+  define: mode === 'browser-test' ? { 'import.meta.env.VITE_ENABLE_BROWSER_METRICS': JSON.stringify('true') } : {},
   plugins: [react(), babel({ presets: [reactCompilerPreset({ compilationMode: 'annotation' })] }), buildAssets()],
   // Test mode replaces the SDK: never share its optimizer output with real dev sessions.
   cacheDir: mode === 'browser-test' ? 'node_modules/.vite-browser-test' : 'node_modules/.vite',

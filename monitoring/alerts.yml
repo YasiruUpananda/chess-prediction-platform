@@ -1,0 +1,27 @@
+groups:
+  - name: chess-reliability
+    rules:
+      - alert: ChessServiceUnreachable
+        expr: up{job=~"chess-.*"} == 0
+        for: 2m
+        annotations:
+          summary: A chess service cannot be scraped
+      - alert: ChessJobFailures
+        expr: sum(increase(chess_jobs_total{outcome="failed"}[10m])) > 0
+        annotations:
+          summary: A chess background job failed
+      - alert: ChessWorkerHeartbeatStale
+        expr: chess_worker_heartbeat_age_seconds > 45
+        for: 1m
+        annotations:
+          summary: A chess worker stopped reporting successful heartbeats
+      - alert: ChessDatabaseUnavailable
+        expr: chess_database_up == 0
+        for: 1m
+        annotations:
+          summary: PostgreSQL is unavailable
+      - alert: ChessOcrQueueDelay
+        expr: histogram_quantile(0.95, sum by (le) (rate(chess_ocr_queue_seconds_bucket[15m]))) > 30
+        for: 5m
+        annotations:
+          summary: OCR queue p95 exceeds 30 seconds

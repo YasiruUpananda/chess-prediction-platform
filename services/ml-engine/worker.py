@@ -96,6 +96,8 @@ def decode_task(body):
 def main():
     from telemetry import configure
     configure('neuro-chess-worker')
+    from metrics import start_worker_metrics, JOBS
+    start_worker_metrics()
     delay = 1
     with ThreadPoolExecutor(max_workers=1) as pool:
         while True:
@@ -125,7 +127,9 @@ def main():
                                 conn.process_data_events(time_limit=1)
                                 heartbeat('ingestion', HEALTH_FILE)
                             future.result()
+                            JOBS.labels('ingestion','completed').inc()
                         except Exception as exc:
+                            JOBS.labels('ingestion','failed').inc()
                             logger.exception("Ingestion job failed")
                             error = exc
                         attempts = int((properties.headers or {}).get("attempts", 0))

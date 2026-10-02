@@ -11,6 +11,8 @@ from typing import Literal
 import chess.pgn
 import redis
 import httpx
+import time
+from metrics import CACHE, REPORT_FIRST, REPORTS, REPORT_FAILURES, record_usage, COST_UNKNOWN
 from pydantic import BaseModel, Field, model_validator
 from database import connect
 from rag_store import COLLECTION_NAME, get_vector_store
@@ -123,8 +125,11 @@ class GeminiReportClient:
                     'temperature':.2,'maxOutputTokens':4096,'responseMimeType':'application/json','responseSchema':report_schema()}})
             response.raise_for_status()
         except httpx.HTTPError as error:
+            COST_UNKNOWN.inc()
             raise StrategyProviderUnavailable('Gemini is unavailable or rejected the request. Verified statistics remain available; retry shortly.') from error
-        candidates = response.json().get('candidates', [])
+        data = response.json()
+        record_usage(data)
+        candidates = data.get('candidates', [])
         if not candidates or candidates[0].get('finishReason') != 'STOP':
             raise ValueError('Gemini report was blocked, truncated or incomplete')
         text = ''.join(part.get('text','') for part in candidates[0].get('content',{}).get('parts',[]) if not part.get('thought'))
@@ -145,8 +150,10 @@ def cache_read(key):
             result = json.loads(raw)
             validate_report(StrategyReport.model_validate(result['report']),result['sources'],result['statistics'])
             result['cached'] = True
+            CACHE.labels('strategy','hit').inc()
             return result
-    except Exception: pass
+        CACHE.labels('strategy','miss').inc()
+    except Exception: CACHE.labels('strategy','error').inc()
 
 def cache_write(key,result):
     try: report_cache().setex(key,3600,json.dumps(result))
@@ -184,7 +191,10 @@ def validate_report(report,sources,statistics):
     return report
 
 async def strategy_events(opponent_name,context='',color='any'):
-    if not REPORT_SLOTS.acquire(blocking=False): raise StrategyBusy('Strategy workers are busy. Retry shortly.')
+    started = time.perf_counter()
+    if not REPORT_SLOTS.acquire(blocking=False):
+        REPORT_FAILURES.labels('busy').inc()
+        raise StrategyBusy('Strategy workers are busy. Retry shortly.')
     try:
         async with asyncio.timeout(75):
             player = opponent_name.strip().lower()
@@ -193,6 +203,7 @@ async def strategy_events(opponent_name,context='',color='any'):
             if count<3: raise InsufficientGameData(f'Insufficient game data: {count} indexed games; at least 3 are required.')
             statistics,ids,version = await asyncio.to_thread(factual_statistics,player,color)
             if len(ids)<3: raise InsufficientGameData('At least 3 indexed games are required for the selected color.')
+            REPORT_FIRST.observe(time.perf_counter()-started)
             yield {'type':'statistics','statistics':statistics,'available_games':len(ids)}
             model_name = os.getenv('GOOGLE_MODEL','gemini-3.8-flash')
             key = 'strategy:' + hashlib.sha256(json.dumps([player,context.strip(),color,version,model_name,
@@ -200,6 +211,7 @@ async def strategy_events(opponent_name,context='',color='any'):
                 os.getenv('VECTOR_SEARCH_MODE','exact')]).encode()).hexdigest()
             cached = await asyncio.to_thread(cache_read,key)
             if cached:
+                REPORTS.labels('true').inc()
                 yield {'type':'complete','result':cached}
                 return
             if not os.getenv('GOOGLE_API_KEY'): raise StrategyNotConfigured('Set GOOGLE_API_KEY to enable strategy analysis.')
@@ -222,7 +234,13 @@ sequences, not inferred ECO classifications. Evidence JSON:\n''' + json.dumps({'
                 'supporting_games':len(sources),'available_games':len(ids),'data_version':version,'model':model_name,
                 'prompt_version':PROMPT_VERSION,'cached':False}
             await asyncio.to_thread(cache_write,key,result)
+            REPORTS.labels('false').inc()
             yield {'type':'complete','result':result}
+    except Exception as error:
+        reason = type(error).__name__
+        REPORT_FAILURES.labels(reason if reason in ('InsufficientGameData','StrategyNotConfigured',
+            'StrategyProviderUnavailable','TimeoutError','ValueError') else 'other').inc()
+        raise
     finally: REPORT_SLOTS.release()
 
 def generate_chess_prediction(opponent_name,context='',color='any'):

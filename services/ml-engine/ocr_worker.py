@@ -12,6 +12,7 @@ from pathlib import Path
 import ocr_jobs
 from database import init_db
 from backend_health import heartbeat
+from metrics import start_worker_metrics, OCR_PROCESS, JOBS
 
 HEALTH_FILE = Path("/tmp/ocr-heartbeat")
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +47,7 @@ def run_extract(page, content):
 def main():
     from telemetry import configure
     configure('neuro-chess-ocr_worker')
+    start_worker_metrics()
     delay = 1
     while True:
         try:
@@ -58,14 +60,19 @@ def main():
                     time.sleep(1)
                     continue
                 job_id, page, content, trace_context = job
+                started = time.perf_counter()
                 try:
                     from telemetry import continued
                     result = continued(trace_context, run_extract, page, bytes(content))
                 except Exception as exc:
+                    JOBS.labels('ocr','failed').inc()
                     logger.warning("OCR job %s failed (%s)", job_id, type(exc).__name__)
                     ocr_jobs.finish(job_id, error=str(exc) if isinstance(exc, (ValueError, TimeoutError)) else "OCR processing failed")
                 else:
+                    JOBS.labels('ocr','completed').inc()
                     ocr_jobs.finish(job_id, result=result)
+                finally:
+                    OCR_PROCESS.observe(time.perf_counter()-started)
         except Exception as exc:
             HEALTH_FILE.unlink(missing_ok=True)
             logger.warning("OCR worker unavailable (%s); retrying", type(exc).__name__)
