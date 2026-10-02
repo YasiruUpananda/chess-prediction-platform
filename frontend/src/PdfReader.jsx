@@ -1,5 +1,4 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import ResponsiveBoard from './ResponsiveBoard';
 import SavedStudies from './SavedStudies';
 import { Chess } from 'chess.js';
@@ -17,6 +16,7 @@ export default function PdfReader() {
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageWidth, setPageWidth] = useState(680);
+  const documentPanel = useRef(null);
   const [pdfError, setPdfError] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [initialFen, setInitialFen] = useState(new Chess().fen());
@@ -40,10 +40,9 @@ export default function PdfReader() {
   const [moveStatus, setMoveStatus] = useState('Choose a move to play it on the board.');
 
   useEffect(() => {
-    const updatePageWidth = () => setPageWidth(Math.min(760, Math.max(280, window.innerWidth - 64)));
-    updatePageWidth();
-    window.addEventListener('resize', updatePageWidth);
-    return () => window.removeEventListener('resize', updatePageWidth);
+    const observer = new ResizeObserver(([entry]) => setPageWidth(Math.min(760, Math.max(1, Math.floor(entry.contentRect.width - 36)))));
+    if (documentPanel.current) observer.observe(documentPanel.current);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -221,16 +220,6 @@ export default function PdfReader() {
 
   return (
     <main className="reader-shell">
-      <header className="reader-header">
-        <Link className="brand" to="/" aria-label="Neuro Chess home">
-          <span className="brand-mark">♞</span>
-          <span><strong>Neuro Chess</strong><small>Chess book library</small></span>
-        </Link>
-        <div className="reader-header-actions">
-          <span className="eyebrow">Study room</span>
-          <Link className="reader-back-link" to="/">← Back to home</Link>
-        </div>
-      </header>
 
       <div className="reader-title-row">
         <div><span className="eyebrow">Read. Explore. Play.</span><h1>Interactive book reader</h1>
@@ -239,7 +228,7 @@ export default function PdfReader() {
       </div>
 
       <div className="reader-layout">
-        <section className="reader-document panel" aria-label="PDF document">
+        <section ref={documentPanel} className="reader-document panel" aria-label="PDF document">
           <div className="reader-panel-heading">
             <div><span className="eyebrow">Your library</span><h2>{pdfFile ? pdfFile.name : 'Open a chess book'}</h2></div>
             {pdfFile && numPages > 0 && <span className="reader-page-count">{pageNumber} / {numPages}</span>}
@@ -251,7 +240,7 @@ export default function PdfReader() {
               <strong>Choose a PDF to read</strong>
               <span>Text based and scanned chess books are supported.</span>
               <span className="reader-primary-button">Browse files</span>
-              <input type="file" accept="application/pdf,.pdf" onChange={onFileChange} />
+              <input aria-label="Choose a PDF to read" type="file" accept="application/pdf,.pdf" onChange={onFileChange} />
             </label>
           ) : (
             <>
@@ -275,13 +264,10 @@ export default function PdfReader() {
         </section>
 
         <aside className="reader-side-column">
-          <SavedStudies owner={state.sub || state.username || 'session'} disabled={isExtracting}
-            snapshot={{fen:game.fen(),initial_fen:initialFen,moves:timeline.slice(0,cursor),opponent_name:'',context:'',color:'any'}}
-            onLoad={(study)=>{setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setMoveInput('');setMoveStatus('Saved study opened.');}} />
           <section className="reader-board-card panel">
             <div className="reader-panel-heading"><div><span className="eyebrow">Interactive board</span><h2>Try the position</h2></div><span className="reader-turn">{game.turn() === 'w' ? 'White to move' : 'Black to move'}</span></div>
             <div className="reader-board-frame">
-              <ResponsiveBoard position={game.fen()} boardOrientation={orientation} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#54715b' }} customLightSquareStyle={{ backgroundColor: '#e7e1d1' }} />
+              <ResponsiveBoard position={game.fen()} boardOrientation={orientation} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#786347' }} customLightSquareStyle={{ backgroundColor: '#eee5d3' }} />
             </div>
             <form className="keyboard-move-form" onSubmit={(event) => {
               event.preventDefault(); const text = moveInput.trim();
@@ -327,6 +313,9 @@ export default function PdfReader() {
               <div className="reader-move-list">{pageMoves.map((move, index) => <button className="reader-move-chip" type="button" key={`${move}-${index}`} onClick={() => handlePlayMove(move)}>{move}</button>)}</div>
             ) : <p className="reader-empty-state">{isExtracting ? 'Checking the page text and scanned image…' : 'No valid move tokens found on this page.'}</p>}
           </section>
+          <SavedStudies owner={state.sub || state.username || 'session'} disabled={isExtracting}
+            snapshot={{fen:game.fen(),initial_fen:initialFen,moves:timeline.slice(0,cursor),opponent_name:'',context:'',color:'any'}}
+            onLoad={(study)=>{setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setMoveInput('');setMoveStatus('Saved study opened.');}} />
         </aside>
       </div>
     </main>

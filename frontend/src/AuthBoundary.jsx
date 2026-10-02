@@ -10,7 +10,7 @@ export default function AuthBoundary({ children }) {
     if (sessionStorage.getItem(AUTH_RECOVERY_KEY)) return 'signin';
     return window.location.pathname !== '/' || query.has('code') || query.has('error') ? 'session' : '';
   });
-  if (requested) return <Suspense fallback={<main className="app-shell" role="status">Checking your secure session…</main>}>
+  if (requested) return <Suspense fallback={<SessionContext.Provider value={{state:{isAuthenticated:false,isLoading:true},requestSession:()=>{},signIn:()=>{}}}>{children}</SessionContext.Provider>}>
     <SdkSession signInRequested={requested === 'signin'}>{children}</SdkSession>
   </Suspense>;
   return <SessionContext.Provider value={{ state: { isAuthenticated: false, isLoading: false },

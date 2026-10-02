@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useSelector, useDispatch, useStore } from 'react-redux';
 import {
   setFen,
@@ -46,7 +45,7 @@ function Statistics({ statistics }) {
   </details>;
 }
 
-export default function App() {
+export default function Dashboard() {
   const dispatch = useDispatch();
   const store = useStore();
   const moveGate = useMemo(() => createRequestGate(), []);
@@ -61,7 +60,7 @@ export default function App() {
     strategyGate.cancel();
     dispatch(clearStrategy());
   }, [moveGate, strategyGate, dispatch]);
-  const { state, signIn, signOut, getAccessToken } = useSession();
+  const { state, signIn, getAccessToken } = useSession();
 
   // --- Read Global State from Redux ---
   const { fen, opponentName, strategyAnalysis, predictedMove, loading, error, supportingGames, availableGames, initialFen, moves } = useSelector(
@@ -195,19 +194,6 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="site-header">
-        <Link className="brand" to="/" aria-label="Neuro Chess home" style={{ textDecoration: 'none' }}>
-          <span className="brand-mark">♞</span>
-          <span>
-            <strong>Neuro Chess</strong>
-            <small>Opponent intelligence</small>
-          </span>
-        </Link>
-        <div className="header-copy">
-          <span className="eyebrow">AI-powered analysis</span>
-          <p>Predict the position. Prepare the plan.</p>
-        </div>
-      </header>
 
       <main className="dashboard" id="top">
         <section className="board-panel panel">
@@ -223,8 +209,8 @@ export default function App() {
               position={game.fen()} boardOrientation={orientation}
               onPieceDrop={onDrop}
               arePiecesDraggable={!movePending && Boolean(selectedPlayer) && !playersLoading && !predictedMove?.game_over}
-              customDarkSquareStyle={{ backgroundColor: '#54715b' }}
-              customLightSquareStyle={{ backgroundColor: '#e7e1d1' }}
+              customDarkSquareStyle={{ backgroundColor: '#786347' }}
+              customLightSquareStyle={{ backgroundColor: '#eee5d3' }}
             />
           </div>
           <form className="keyboard-move-form" onSubmit={submitMove}>
@@ -271,12 +257,6 @@ export default function App() {
         </section>
 
         <section className="analysis-column">
-          <SavedStudies owner={state.sub || state.username || 'session'} disabled={movePending || loading}
-            snapshot={{fen,initial_fen:initialFen,moves,opponent_name:opponentName,context,color:reportColor}}
-            onLoad={(study)=>{
-              moveGate.cancel(); invalidateStrategy(); setMovePending(false); setMoveError(''); setAiSuggestion('');
-              setContext(study.context); setReportColor(study.color); setMoveInput(''); dispatch(loadStudy(study));
-            }} />
           <div className="analysis-intro">
             <span className="eyebrow">Your preparation room</span>
             <h2>Understand your opponent before the next move.</h2>
@@ -286,9 +266,6 @@ export default function App() {
               <div className="user-bar panel">
                 <div className="avatar">{(state.username || 'U').charAt(0).toUpperCase()}</div>
                 <span>Welcome back, <b>{state.username || 'User'}</b></span>
-                <button onClick={() => signOut()} className="text-button">
-                  Logout
-                </button>
               </div>
               
               <form onSubmit={handleGeneratePrediction} className="analysis-form panel">
@@ -428,8 +405,8 @@ export default function App() {
                       ))}
                       <h4>Evidence limitations</h4><ul>{strategyAnalysis.report.limitations.map((text, index) => <li key={index}>{text}</li>)}</ul>
                       <h4>Supporting games</h4>{strategyAnalysis.sources.map((source, index) => <details key={source.id} id={`game-${source.id}`}>
-                        <summary>Game {index + 1}: {source.white} vs {source.black} ? {source.result} ? {source.date}</summary>
-                        <p>{source.event} ? ECO: {source.eco} ? Time control: {source.timecontrol}</p>
+                        <summary>Game {index + 1}: {source.white} vs {source.black} · {source.result} · {source.date}</summary>
+                        <p>{source.event} · ECO: {source.eco} · Time control: {source.timecontrol}</p>
                         <pre className="report-diagram">{source.pgn}</pre><small>Reference: {source.id}</small>
                       </details>)}
                     </div>
@@ -448,6 +425,12 @@ export default function App() {
                </button>
             </div>
           )}
+          <SavedStudies owner={state.sub || state.username || 'session'} disabled={movePending || loading}
+            snapshot={{fen,initial_fen:initialFen,moves,opponent_name:opponentName,context,color:reportColor}}
+            onLoad={(study)=>{
+              moveGate.cancel(); invalidateStrategy(); setMovePending(false); setMoveError(''); setAiSuggestion('');
+              setContext(study.context); setReportColor(study.color); setMoveInput(''); dispatch(loadStudy(study));
+            }} />
         </section>
       </main>
     </div>
