@@ -13,6 +13,7 @@ async function fixture(page,{moveDelay=0,reportDelay=0,unauthorized=false}={}) {
     const request=route.request();
     const headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET,POST,OPTIONS'};
     if(request.method()==='OPTIONS') return route.fulfill({status:204,headers});
+    if(request.url().endsWith('/studies')) return route.fulfill({headers,json:{studies:[]}});
     if(request.url().endsWith('/players')) {
       counts.players++;
       return route.fulfill({headers,json:{players:[{name:'Alice',games:3},{name:'Bob',games:8}]}});

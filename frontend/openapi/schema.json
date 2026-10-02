@@ -6,6 +6,128 @@
     "version": "2.0.0"
   },
   "paths": {
+    "/api/v1/studies": {
+      "get": {
+        "tags": [
+          "Studies"
+        ],
+        "summary": "List Studies",
+        "operationId": "list_studies_api_v1_studies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudyList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Studies"
+        ],
+        "summary": "Save Study",
+        "operationId": "save_study_api_v1_studies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StudyInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedStudy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/studies/{study_id}": {
+      "delete": {
+        "tags": [
+          "Studies"
+        ],
+        "summary": "Delete Study",
+        "operationId": "delete_study_api_v1_studies__study_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "study_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Study Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/browser-vitals": {
+      "post": {
+        "summary": "Record Vital",
+        "operationId": "record_vital_api_v1_browser_vitals_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health Check",
@@ -475,7 +597,8 @@
             "type": "string",
             "enum": [
               "available",
-              "unavailable"
+              "unavailable",
+              "busy"
             ],
             "title": "Status",
             "default": "unavailable"
@@ -1093,6 +1216,74 @@
         ],
         "title": "PlayersResponse"
       },
+      "SavedStudy": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "fen": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 10,
+            "title": "Fen"
+          },
+          "initial_fen": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 10,
+            "title": "Initial Fen"
+          },
+          "moves": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 1500,
+            "title": "Moves"
+          },
+          "opponent_name": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Opponent Name",
+            "default": ""
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Context",
+            "default": ""
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^(any|white|black)$",
+            "title": "Color",
+            "default": "any"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "fen",
+          "initial_fen",
+          "moves",
+          "id",
+          "created_at"
+        ],
+        "title": "SavedStudy"
+      },
       "SourceGame": {
         "properties": {
           "id": {
@@ -1303,6 +1494,78 @@
           "limitations"
         ],
         "title": "StrategyReport"
+      },
+      "StudyInput": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "fen": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 10,
+            "title": "Fen"
+          },
+          "initial_fen": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 10,
+            "title": "Initial Fen"
+          },
+          "moves": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 1500,
+            "title": "Moves"
+          },
+          "opponent_name": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Opponent Name",
+            "default": ""
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Context",
+            "default": ""
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^(any|white|black)$",
+            "title": "Color",
+            "default": "any"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "fen",
+          "initial_fen",
+          "moves"
+        ],
+        "title": "StudyInput"
+      },
+      "StudyList": {
+        "properties": {
+          "studies": {
+            "items": {
+              "$ref": "#/components/schemas/SavedStudy"
+            },
+            "type": "array",
+            "title": "Studies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "studies"
+        ],
+        "title": "StudyList"
       },
       "ValidationError": {
         "properties": {

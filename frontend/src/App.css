@@ -99,3 +99,9 @@
 .board-footer code { overflow-wrap: anywhere; }
 .dashboard > *, .analysis-column > * { min-width: 0; }
 @media (max-width: 900px) { .dashboard { grid-template-columns: minmax(0, 1fr); } }
+.saved-studies { padding: 1.25rem; min-width: 0; }
+.saved-studies form, .saved-studies li { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; }
+.saved-studies input { min-width: 0; max-width: 100%; flex: 1; padding: .6rem; }
+.saved-studies ul { padding-left: 1.2rem; }
+.saved-studies li { margin: .5rem 0; overflow-wrap: anywhere; }
+.board-moves { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; padding: 0; }

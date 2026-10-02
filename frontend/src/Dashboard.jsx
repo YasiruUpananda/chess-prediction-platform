@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useSelector, useDispatch, useStore } from 'react-redux';
 import {
   setFen,
+  loadStudy,
   setGameSnapshot,
   setOpponentName,
   setLoading,
@@ -13,6 +14,8 @@ import {
 } from './store/chessSlice';
 import ResponsiveBoard from './ResponsiveBoard';
 import ReportContent from './ReportContent';
+import SavedStudies from './SavedStudies';
+import { reportMarkdown, downloadText } from './reportExport';
 import { Chess } from 'chess.js';
 import { useSession } from './sessionContext';
 import { authenticatedRequest, friendlyError } from './api';
@@ -240,6 +243,8 @@ export default function App() {
             <code>{fen.split(' ').slice(0, 4).join(' ')}</code>
           </div>
           <div className="board-history">
+            <ol className="board-moves" aria-label="Move history">{game.history().map((san,index)=><li key={index}>{index%2===0?`${Math.floor(index/2)+1}. `:''}{san}</li>)}</ol>
+            <button type="button" className="reader-secondary-button" onClick={()=>downloadText(game.pgn(),'study.pgn','application/x-chess-pgn')}>Export PGN</button>
             <button type="button" className="reader-secondary-button" onClick={() => setOrientation(orientation === 'white' ? 'black' : 'white')}>Flip board</button>
             <button type="button" className="reader-secondary-button" disabled={!moves.length} onClick={() => {
               moveGate.cancel(); setMovePending(false); setMoveError(''); setAiSuggestion('');
@@ -266,6 +271,12 @@ export default function App() {
         </section>
 
         <section className="analysis-column">
+          <SavedStudies owner={state.sub || state.username || 'session'} disabled={movePending || loading}
+            snapshot={{fen,initial_fen:initialFen,moves,opponent_name:opponentName,context,color:reportColor}}
+            onLoad={(study)=>{
+              moveGate.cancel(); invalidateStrategy(); setMovePending(false); setMoveError(''); setAiSuggestion('');
+              setContext(study.context); setReportColor(study.color); setMoveInput(''); dispatch(loadStudy(study));
+            }} />
           <div className="analysis-intro">
             <span className="eyebrow">Your preparation room</span>
             <h2>Understand your opponent before the next move.</h2>
@@ -373,6 +384,7 @@ export default function App() {
                   )}
                   {strategyAnalysis && (
                     <div className="strategy-result strategy-report">
+                      <button type="button" className="reader-secondary-button" onClick={()=>downloadText(reportMarkdown(strategyAnalysis),'opponent-report.md','text/markdown')}>Export report</button>
                       <p>Opponent color: {strategyAnalysis.color}. {strategyAnalysis.context && `Context: ${strategyAnalysis.context}`}</p>
                       <p>Based on {supportingGames} supporting games from {availableGames} indexed games for this opponent. {strategyAnalysis.cached && "Cached report."}</p>
                       <Statistics statistics={strategyAnalysis.statistics} />

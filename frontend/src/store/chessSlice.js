@@ -20,6 +20,9 @@ export const chessSlice = createSlice({
   initialState,
   reducers: {
     resetWorkspace: () => initialState,
+    loadStudy: (_state, action) => ({ ...initialState, initialFen: action.payload.initial_fen,
+      fen: action.payload.fen, moves: action.payload.moves, opponentName: action.payload.opponent_name,
+      revision: _state.revision + 1 }),
     setFen: (state, action) => {
       state.fen = action.payload;
       state.initialFen = action.payload;
@@ -88,6 +91,7 @@ export const chessSlice = createSlice({
 
 export const {
   resetWorkspace,
+  loadStudy,
   setFen,
   setGameSnapshot,
   setOpponentName,

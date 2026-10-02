@@ -7,6 +7,8 @@ export type MoveResponse = components['schemas']['MovePredictionResponse'];
 export type StrategyRequest = components['schemas']['StrategyPredictionRequest'];
 export type StrategyResponse = components['schemas']['StrategyPredictionResponse'];
 export type OcrJob = components['schemas']['OcrJobResponse'];
+export type StudyInput = components['schemas']['StudyInput'];
+export type SavedStudy = components['schemas']['SavedStudy'];
 type Options = { signal?: AbortSignal; timeout?: number; getAccessToken?: () => Promise<string> };
 
 export function getPlayers(options: Options = {}): Promise<components['schemas']['PlayersResponse']> {

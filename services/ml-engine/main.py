@@ -30,6 +30,7 @@ from token_auth import require_asgardeo_user
 from operations import report_user, ocr_user, move_user, ingestion_user, require_ingestion_permission
 from backend_health import readiness
 from fastapi.responses import JSONResponse
+from studies import router as studies_router
 
 logger = logging.getLogger("neuro_chess.api")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -50,6 +51,7 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+app.include_router(studies_router)
 
 from telemetry import configure
 configure('neuro-chess-api')
@@ -114,7 +116,7 @@ class EngineLine(BaseModel):
 
 
 class EngineEvaluation(BaseModel):
-    status: Literal['available', 'unavailable'] = 'unavailable'
+    status: Literal['available', 'unavailable', 'busy'] = 'unavailable'
     name: str = 'Stockfish 18'
     cached: bool = False
     best: Optional[EngineLine] = None

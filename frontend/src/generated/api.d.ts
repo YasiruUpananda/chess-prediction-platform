@@ -4,6 +4,58 @@
  */
 
 export interface paths {
+    "/api/v1/studies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Studies */
+        get: operations["list_studies_api_v1_studies_get"];
+        put?: never;
+        /** Save Study */
+        post: operations["save_study_api_v1_studies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/studies/{study_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Study */
+        delete: operations["delete_study_api_v1_studies__study_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/browser-vitals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Vital */
+        post: operations["record_vital_api_v1_browser_vitals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -245,7 +297,7 @@ export interface components {
              * @default unavailable
              * @enum {string}
              */
-            status: "available" | "unavailable";
+            status: "available" | "unavailable" | "busy";
             /**
              * Name
              * @default Stockfish 18
@@ -471,6 +523,42 @@ export interface components {
             /** Players */
             players: components["schemas"]["PlayerSummary"][];
         };
+        /** SavedStudy */
+        SavedStudy: {
+            /** Title */
+            title: string;
+            /** Fen */
+            fen: string;
+            /** Initial Fen */
+            initial_fen: string;
+            /** Moves */
+            moves: string[];
+            /**
+             * Opponent Name
+             * @default
+             */
+            opponent_name: string;
+            /**
+             * Context
+             * @default
+             */
+            context: string;
+            /**
+             * Color
+             * @default any
+             */
+            color: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** SourceGame */
         SourceGame: {
             /** Id */
@@ -556,6 +644,37 @@ export interface components {
             /** Limitations */
             limitations: string[];
         };
+        /** StudyInput */
+        StudyInput: {
+            /** Title */
+            title: string;
+            /** Fen */
+            fen: string;
+            /** Initial Fen */
+            initial_fen: string;
+            /** Moves */
+            moves: string[];
+            /**
+             * Opponent Name
+             * @default
+             */
+            opponent_name: string;
+            /**
+             * Context
+             * @default
+             */
+            context: string;
+            /**
+             * Color
+             * @default any
+             */
+            color: string;
+        };
+        /** StudyList */
+        StudyList: {
+            /** Studies */
+            studies: components["schemas"]["SavedStudy"][];
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -578,6 +697,106 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_studies_api_v1_studies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudyList"];
+                };
+            };
+        };
+    };
+    save_study_api_v1_studies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StudyInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedStudy"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_study_api_v1_studies__study_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                study_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_vital_api_v1_browser_vitals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     health_check_health_get: {
         parameters: {
             query?: never;

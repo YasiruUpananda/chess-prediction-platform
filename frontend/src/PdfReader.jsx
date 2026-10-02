@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ResponsiveBoard from './ResponsiveBoard';
+import SavedStudies from './SavedStudies';
 import { Chess } from 'chess.js';
 import { parseChessText, textBlocks, EXTRACTION_VERSION } from './chessPdf';
 import { restoreGame, gameSnapshot } from './gameHistory';
@@ -10,7 +11,7 @@ import { extractPageImage, getOcrJob } from './apiClient';
 const PdfDocumentView = lazy(() => import('./PdfDocumentView'));
 
 export default function PdfReader() {
-  const { getAccessToken } = useSession();
+  const { getAccessToken, state } = useSession();
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfDocument, setPdfDocument] = useState(null);
   const [numPages, setNumPages] = useState(0);
@@ -274,6 +275,9 @@ export default function PdfReader() {
         </section>
 
         <aside className="reader-side-column">
+          <SavedStudies owner={state.sub || state.username || 'session'} disabled={isExtracting}
+            snapshot={{fen:game.fen(),initial_fen:initialFen,moves:timeline.slice(0,cursor),opponent_name:'',context:'',color:'any'}}
+            onLoad={(study)=>{setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setMoveInput('');setMoveStatus('Saved study opened.');}} />
           <section className="reader-board-card panel">
             <div className="reader-panel-heading"><div><span className="eyebrow">Interactive board</span><h2>Try the position</h2></div><span className="reader-turn">{game.turn() === 'w' ? 'White to move' : 'Black to move'}</span></div>
             <div className="reader-board-frame">

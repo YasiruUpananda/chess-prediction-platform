@@ -91,6 +91,7 @@ services:
       RATE_OCR_PER_MINUTE: ${RATE_OCR_PER_MINUTE:-12}
       RATE_MOVES_PER_MINUTE: ${RATE_MOVES_PER_MINUTE:-60}
       RATE_INGESTION_PER_MINUTE: ${RATE_INGESTION_PER_MINUTE:-5}
+      RATE_STUDIES_PER_MINUTE: ${RATE_STUDIES_PER_MINUTE:-30}
     volumes:
       - ./services/ml-engine/data:/app/data:ro
       - modelcache:/root/.cache/huggingface

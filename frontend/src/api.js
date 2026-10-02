@@ -40,7 +40,7 @@ export async function getBearerHeaders(getAccessToken = tokenProvider, signal) {
   }
 }
 
-export async function authenticatedRequest(path, options = {}, consume = (response) => response.json()) {
+export async function authenticatedRequest(path, options = {}, consume = (response) => response.status === 204 ? null : response.json()) {
   const { getAccessToken, timeout = 15000, signal, body, ...rest } = options;
   const controller = new AbortController();
   let timedOut = false;

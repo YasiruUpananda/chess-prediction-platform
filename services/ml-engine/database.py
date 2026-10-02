@@ -106,6 +106,11 @@ def init_db():
                 count INTEGER NOT NULL, PRIMARY KEY(owner,operation)
             );
             CREATE INDEX IF NOT EXISTS idx_request_limit_window ON request_limits(window_id);
+            CREATE TABLE IF NOT EXISTS saved_studies (
+                id UUID PRIMARY KEY, owner TEXT NOT NULL, title TEXT NOT NULL,
+                snapshot JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE INDEX IF NOT EXISTS idx_studies_owner ON saved_studies(owner,created_at DESC);
         """)
         # Older rows were written with legal FENs; normalize legal EP state too.
         import chess
