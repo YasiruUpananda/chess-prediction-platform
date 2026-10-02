@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
+import { useAuthContext } from '@asgardeo/auth-react';
+import { API_BASE_URL, getBearerHeaders } from './api';
 
 export default function ChessUI() {
   const [game, setGame] = useState(new Chess());
+  const { getAccessToken } = useAuthContext();
 
   function makeAMove(move) {
     const gameCopy = new Chess(game.fen());
@@ -11,7 +14,7 @@ export default function ChessUI() {
       const result = gameCopy.move(move);
       setGame(gameCopy);
       return { result, fen: gameCopy.fen() };
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -26,11 +29,13 @@ export default function ChessUI() {
     // If the move is illegal, snap the piece back to its original square
     if (move === null || move.result === null) return false;
 
-    void fetch('http://localhost:8000/api/v1/predict-move', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fen: move.fen, opponent_username: '' }),
-    }).catch(console.error);
+    void getBearerHeaders(getAccessToken)
+      .then((headers) => fetch(`${API_BASE_URL}/api/v1/predict-move`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fen: move.fen, opponent_username: '' }),
+      }))
+      .catch(console.error);
     
     return true;
   }

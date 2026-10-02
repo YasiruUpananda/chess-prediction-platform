@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Optional
+from typing import Any, Optional
 from dotenv import find_dotenv, load_dotenv
 
 # Automatically find and load .env from the current or parent directory
@@ -10,7 +10,7 @@ import pika
 import chess
 import torch
 import redis.asyncio as aioredis
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ from pydantic import BaseModel
 # Internal engine imports
 from model import ChessOpponentPredictor
 from predict_opponent import generate_chess_prediction
+from token_auth import require_asgardeo_user
 
 # --- FastAPI Initialization ---
 app = FastAPI(
@@ -116,7 +117,7 @@ def health_check():
 
 
 @app.post("/api/v1/predict-move", response_model=MovePredictionResponse)
-async def predict_move(request: MovePredictionRequest):
+async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Predicts a specific move using the PyTorch neural network, board evaluation, and Redis cache."""
     try:
         board = chess.Board(request.fen)
@@ -195,7 +196,7 @@ class IngestRequest(BaseModel):
     filename: str
 
 @app.post("/api/v1/ingest-async")
-def trigger_ingest(request: IngestRequest):
+def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Triggers an asynchronous PGN ingestion task via RabbitMQ."""
     success = publish_pgn_task(request.filename)
     if not success:
@@ -203,7 +204,7 @@ def trigger_ingest(request: IngestRequest):
     return {"status": "Accepted", "message": f"Dataset {request.filename} queued for background processing."}
 
 @app.post("/api/v1/predict-strategy", response_model=StrategyPredictionResponse)
-def predict_strategy(request: StrategyPredictionRequest):
+def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Generates an in-depth strategic analysis using Gemini and PostgreSQL (pgvector)."""
     try:
         # Construct the context query

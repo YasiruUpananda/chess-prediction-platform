@@ -12,11 +12,12 @@ import axios from 'axios';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import { useAuthContext } from "@asgardeo/auth-react";
+import { API_BASE_URL, getBearerHeaders } from './api';
 import './App.css'; 
 
 export default function App() {
   const dispatch = useDispatch();
-  const { state, signIn, signOut } = useAuthContext();
+  const { state, signIn, signOut, getAccessToken } = useAuthContext();
 
   // --- Read Global State from Redux ---
   const { fen, opponentName, strategyAnalysis, predictedMove, loading, error } = useSelector(
@@ -43,10 +44,10 @@ export default function App() {
   async function fetchMovePrediction(currentFen) {
     dispatch(setLoading(true));
     try {
-      const response = await axios.post('http://localhost:8000/api/v1/predict-move', {
+      const response = await axios.post(`${API_BASE_URL}/api/v1/predict-move`, {
         fen: currentFen,
         opponent_username: opponentName || "Opponent"
-      });
+      }, { headers: await getBearerHeaders(getAccessToken) });
       
       dispatch(setPredictedMove(response.data));
       const aiMove = response.data.san_move;
@@ -99,10 +100,10 @@ export default function App() {
     dispatch(setLoading(true));
     
     try {
-      const response = await axios.post('http://localhost:8000/api/v1/predict-strategy', {
+      const response = await axios.post(`${API_BASE_URL}/api/v1/predict-strategy`, {
         opponent_name: opponentName || "Magnus Carlsen",
         context: context
-      });
+      }, { headers: await getBearerHeaders(getAccessToken) });
       dispatch(setStrategyAnalysis(response.data.strategy_analysis));
     } catch (error) {
       console.error("Prediction Error:", error);
