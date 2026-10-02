@@ -4,6 +4,7 @@ import SavedStudies from './SavedStudies';
 import { Chess } from 'chess.js';
 import { parseChessText, textBlocks, EXTRACTION_VERSION } from './chessPdf';
 import { restoreGame, gameSnapshot } from './gameHistory';
+import { buildBookTree, nodeAt, continuation, bookMoveLabels } from './bookReplay';
 import { useSession } from './sessionContext';
 import { friendlyError, waitForPoll } from './api';
 import { extractPageImage, getOcrJob } from './apiClient';
@@ -23,6 +24,13 @@ export default function PdfReader() {
   const [fenInput, setFenInput] = useState(new Chess().fen());
   const [timeline, setTimeline] = useState([]);
   const [cursor, setCursor] = useState(0);
+  const [bookTree, setBookTree] = useState(null);
+  const [branchChoices, setBranchChoices] = useState([]);
+  const replayRegion = useRef(null);
+  const branchRegion = useRef(null);
+  useEffect(()=>{
+    if(branchChoices.length) branchRegion.current?.querySelector('button')?.focus({preventScroll:true});
+  },[branchChoices]);
   const game = useMemo(() => restoreGame(initialFen, timeline.slice(0, cursor)), [initialFen, timeline, cursor]);
   const [orientation, setOrientation] = useState('white');
   const [promotion, setPromotion] = useState('q');
@@ -37,6 +45,7 @@ export default function PdfReader() {
   const [pageGeometry, setPageGeometry] = useState(null);
   const extractionCache = useRef(new Map());
   const [pageMoves, setPageMoves] = useState([]);
+  const moveLabels=useMemo(()=>bookMoveLabels(initialFen,timeline.length?timeline:pageMoves,Boolean(timeline.length)),[initialFen,timeline,pageMoves]);
   const [moveStatus, setMoveStatus] = useState('Choose a move to play it on the board.');
 
   useEffect(() => {
@@ -156,6 +165,7 @@ export default function PdfReader() {
     setPageNumber(1);
     setNumPages(0);
     setPdfFile(file);
+    setTimeline([]);setCursor(0);setBookTree(null);setBranchChoices([]);
   }
 
   function onDocumentLoadSuccess(document) {
@@ -171,20 +181,51 @@ export default function PdfReader() {
     try {
       const played = nextGame.move(move);
       const snapshot = gameSnapshot(nextGame);
-      setTimeline(snapshot.moves); setCursor(snapshot.moves.length);
+      setTimeline(snapshot.moves); setCursor(snapshot.moves.length); setBookTree(null); setBranchChoices([]);
       setMoveStatus(`Played ${played.san}.`); return true;
     } catch { setMoveStatus('This move is illegal from the current position.'); return false; }
   }
 
   function onDrop(from, to) { return commitMove({ from, to, promotion }); }
-  function handlePlayMove(san) { commitMove(san); }
-  function handleReplayMoves() {
+  function seekMove(target, tree=bookTree, path=timeline, start=cursor) {
+    const bounded=Math.max(0,Math.min(path.length,target));
+    setBranchChoices([]);
+    for(let ply=start;ply<bounded;ply++) {
+      const choices=nodeAt(tree,path.slice(0,ply))?.children || [];
+      if(choices.length>1) {
+        setCursor(ply); setBranchChoices(choices);
+        setMoveStatus('This position has multiple continuations. Choose which variation to study.');
+        return;
+      }
+    }
+    setCursor(bounded);
+  }
+  function chooseBranch(node) {
+    setTimeline([...timeline.slice(0,cursor),...continuation(node)]);
+    setCursor(cursor+1); setBranchChoices([]); setMoveStatus(`Following ${node.san}.`);
+    replayRegion.current?.focus({preventScroll:true});
+  }
+  function handleReplayMoves(target=0) {
     const nextGame = new Chess(initialFen);
     for (const san of pageMoves) nextGame.move(san);
     const snapshot = gameSnapshot(nextGame);
-    setTimeline(snapshot.moves); setCursor(0);
-    setMoveStatus(`Loaded ${snapshot.moves.length} moves. Use Next move to step through this line.`);
+    if(!lines[selectedLine]) return;
+    const tree=buildBookTree(lines,lines[selectedLine],initialFen);
+    setBookTree(tree); setTimeline(snapshot.moves); setCursor(0); setBranchChoices([]);
+    setMoveStatus(`Loaded ${snapshot.moves.length} plies. Use Left/Right arrow keys or the replay controls.`);
+    if(target) seekMove(target,tree,snapshot.moves,0);
   }
+  useEffect(()=>{
+    function keyboard(event) {
+      if(event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat) return;
+      const target=event.target;
+      if(target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="tablist"]')) return;
+      if(event.key==='ArrowLeft') { event.preventDefault(); seekMove(cursor-1); }
+      if(event.key==='ArrowRight' && !branchChoices.length) { event.preventDefault(); seekMove(cursor+1); }
+    }
+    window.addEventListener('keydown',keyboard);
+    return ()=>window.removeEventListener('keydown',keyboard);
+  });
   function selectLine(index) {
     const line = lines[index]; setSelectedLine(index); setPageMoves(line.moves); setEditor(line.raw);
     setExtractionInfo((info) => ({ ...info, confidence: line.confidence, issue: line.issue }));
@@ -200,7 +241,7 @@ export default function PdfReader() {
     } catch (error) { setMoveStatus(error.message); }
   }
   function applyFen(fen) {
-    try { const board = new Chess(fen); setInitialFen(board.fen()); setFenInput(board.fen()); setTimeline([]); setCursor(0); setMoveStatus('Starting position updated.'); }
+    try { const board = new Chess(fen); if(board.fen()!==initialFen){setPageMoves([]);setLines([]);} setInitialFen(board.fen()); setFenInput(board.fen()); setTimeline([]); setCursor(0); setBookTree(null); setBranchChoices([]); setMoveStatus('Starting position updated.'); }
     catch { setMoveStatus('Invalid FEN. Check the position and side to move.'); }
   }
   function exportPgn() {
@@ -216,6 +257,7 @@ export default function PdfReader() {
     setPageNumber(1);
     setPageMoves([]);
     setPdfError('');
+    setBookTree(null);setBranchChoices([]);
   }
 
   return (
@@ -269,6 +311,22 @@ export default function PdfReader() {
             <div className="reader-board-frame">
               <ResponsiveBoard position={game.fen()} boardOrientation={orientation} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#786347' }} customLightSquareStyle={{ backgroundColor: '#eee5d3' }} />
             </div>
+            <section className="reader-replay" ref={replayRegion} tabIndex={0} aria-label="Book move replay">
+              <div className="reader-panel-heading"><h3>Book moves</h3><span>{cursor} / {timeline.length} plies</span></div>
+              <p className="reader-empty-state">Use ← / → to step backward or forward. Editable fields keep their normal arrow-key behavior.</p>
+              {pageMoves.length>0 && <button className="reader-secondary-button" type="button" onClick={()=>handleReplayMoves()}>{extractionInfo?.issue?'Load validated prefix':'Load reviewed line'}</button>}
+              <div className="reader-move-list">{moveLabels.map((label,index)=><button type="button" key={`${index}-${label}`} className={`reader-move-chip${timeline.length && index===cursor-1?' is-current':''}`} aria-current={timeline.length && index===cursor-1?'step':undefined} onClick={()=>timeline.length?seekMove(index+1):handleReplayMoves(index+1)}>{label}</button>)}</div>
+              {!timeline.length && !pageMoves.length && <p className="reader-empty-state">Extract or enter a line to start studying.</p>}
+              {branchChoices.length>0 && <section ref={branchRegion} className="reader-branch-choice" role="dialog" aria-modal="false" aria-label="Choose a variation" onKeyDown={(event)=>{if(event.key==='Escape'){event.preventDefault();setBranchChoices([]);replayRegion.current?.focus({preventScroll:true});}}}>
+                <h4>Which continuation would you like to study?</h4><p>Choose a move from this position to continue.</p>
+                <div className="reader-board-actions">{branchChoices.map(node=><button key={node.uci} type="button" className="reader-secondary-button" onClick={()=>chooseBranch(node)}>{node.san} · {node.mainLine?'Main line':'Variation'}</button>)}
+                  <button type="button" className="text-button" onClick={()=>{setBranchChoices([]);replayRegion.current?.focus({preventScroll:true});}}>Cancel choice</button></div>
+              </section>}
+              <div className="reader-board-actions">
+                <button className="reader-secondary-button" type="button" onClick={()=>seekMove(cursor-1)} disabled={!cursor}>Previous move</button>
+                <button className="reader-secondary-button" type="button" onClick={()=>seekMove(cursor+1)} disabled={cursor>=timeline.length || Boolean(branchChoices.length)}>Next move</button>
+              </div>
+            </section>
             <form className="keyboard-move-form" onSubmit={(event) => {
               event.preventDefault(); const text = moveInput.trim();
               const move = /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(text) ? { from: text.slice(0,2), to: text.slice(2,4), promotion: text[4] || promotion } : text;
@@ -279,12 +337,9 @@ export default function PdfReader() {
             </form>
             <p className="reader-status" aria-live="polite">{moveStatus}</p>
             <div className="reader-board-actions">
-              <button className="reader-secondary-button" onClick={() => setCursor(Math.max(0, cursor - 1))} disabled={!cursor}>Previous move</button>
-              <span>{cursor} / {timeline.length}</span>
-              <button className="reader-secondary-button" onClick={() => setCursor(Math.min(timeline.length, cursor + 1))} disabled={cursor >= timeline.length}>Next move</button>
-              <button className="reader-secondary-button" onClick={() => { setTimeline(timeline.slice(0, cursor - 1)); setCursor(cursor - 1); }} disabled={!cursor}>Undo move</button>
+              <button className="reader-secondary-button" onClick={() => { setTimeline(timeline.slice(0, cursor - 1)); setCursor(cursor - 1); setBookTree(null);setBranchChoices([]); }} disabled={!cursor}>Undo move</button>
               <button className="reader-secondary-button" onClick={() => setOrientation(orientation === 'white' ? 'black' : 'white')}>Flip board</button>
-              <button className="reader-secondary-button" onClick={() => { setTimeline([]); setCursor(0); }}>Reset board</button>
+              <button className="reader-secondary-button" onClick={() => { setTimeline([]); setCursor(0);setBookTree(null);setBranchChoices([]); }}>Reset board</button>
               <button className="reader-secondary-button" onClick={exportPgn}>Export current PGN</button>
             </div>
             <label className="reader-field">Promote pawn to<select value={promotion} onChange={(event) => setPromotion(event.target.value)}>
@@ -312,14 +367,13 @@ export default function PdfReader() {
             {pdfFile && <><label className="reader-field">Review and correct moves<textarea rows={5} value={editor} onChange={(event) => setEditor(event.target.value)} maxLength={50000} /></label>
               <div className="reader-board-actions"><button className="reader-secondary-button" onClick={correctLine} disabled={isExtracting}>Validate corrections</button>
                 <button className="reader-secondary-button" onClick={() => { setForceOCR(true); setExtractionAttempt((attempt) => attempt + 1); }} disabled={isExtracting}>Try page OCR</button></div></>}
-            {pageMoves.length > 0 && <button className="reader-secondary-button reader-replay-button" type="button" onClick={handleReplayMoves}>{extractionInfo?.issue?'Load validated prefix':'Load reviewed line'}</button>}
             {!pdfFile ? <p className="reader-empty-state">Open a PDF to find chess moves on each page.</p> : pageMoves.length ? (
-              <div className="reader-move-list">{pageMoves.map((move, index) => <button className="reader-move-chip" type="button" key={`${move}-${index}`} onClick={() => handlePlayMove(move)}>{move}</button>)}</div>
+              <p className="reader-empty-state">The reviewed moves and replay controls are directly beneath the board.</p>
             ) : <p className="reader-empty-state">{isExtracting ? 'Checking the page text and scanned image…' : 'No valid move tokens found on this page.'}</p>}
           </section>
           <SavedStudies owner={state.sub || state.username || 'session'} disabled={isExtracting}
             snapshot={{fen:game.fen(),initial_fen:initialFen,moves:timeline.slice(0,cursor),opponent_name:'',context:'',color:'any'}}
-            onLoad={(study)=>{setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setMoveInput('');setMoveStatus('Saved study opened.');}} />
+            onLoad={(study)=>{if(study.initial_fen!==initialFen){setPageMoves([]);setLines([]);}setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setBookTree(null);setBranchChoices([]);setMoveInput('');setMoveStatus('Saved study opened.');}} />
         </aside>
       </div>
     </main>

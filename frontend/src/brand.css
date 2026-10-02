@@ -151,6 +151,14 @@ summary { cursor: pointer; padding: 8px 0; font-size: 13px; color: #ddd4c6; }
 .reader-status, .reader-empty-state { color: #bdb6aa; font-size: 12px; line-height: 1.8; }
 .reader-error { font-size: 13px; }
 .reader-move-chip { background: #222126; color: #f0dfc6; border-color: #514a3f; }
+.reader-replay { margin-top: 18px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.reader-replay .reader-board-actions { margin-top: 16px; }
+.reader-replay h3 { font-size: 18px; }
+.reader-replay .reader-panel-heading > span { font-size: 12px; color: var(--muted); }
+.reader-move-chip.is-current { color: #17130e; background: var(--gold); border-color: var(--gold); }
+.reader-branch-choice { padding: 16px; margin-top: 16px; border: 1px solid #b49a70; border-radius: 10px; background: #29231c; }
+.reader-branch-choice h4 { margin: 0 0 8px; font-size: 16px; }
+.reader-branch-choice p { font-size: 12px; color: #ddd4c6; }
 .protected-card { padding: 40px; margin: 72px auto; }
 .sign-in-card h1, .sign-in-card h3 { font-size: 30px; font-weight: 550; letter-spacing: -.045em; }
 .sign-in-card p { font-size: 14px; }
