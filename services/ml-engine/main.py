@@ -1,32 +1,29 @@
-import io
 import asyncio
 import json
 import logging
 import math
 import os
-import re
+from uuid import UUID
 from pathlib import Path
 from typing import Any, Optional
 
 import chess
-import fitz
-import pytesseract
 import redis.asyncio as aioredis
 import psycopg
 from dotenv import find_dotenv, load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
-from PIL import Image
 from pydantic import BaseModel, Field
 
 # Automatically find and load .env from the current or parent directory
 load_dotenv(find_dotenv())
 
 from predict_opponent import generate_chess_prediction, InsufficientGameData, StrategyNotConfigured
-from token_auth import require_asgardeo_user
 from database import init_db
 from task_queue import enqueue
+import ocr_jobs
+from token_auth import require_asgardeo_user
 
 logger = logging.getLogger("neuro_chess.api")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -98,10 +95,6 @@ class StrategyPredictionResponse(BaseModel):
     supporting_games: int
     available_games: int
 
-
-# --- Regular Expressions ---
-# Standard Algebraic Notation Regex for extracting chess moves from text
-SAN_REGEX = r"\b(?:[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?|O-O(?:-O)?)\b"
 
 PIECE_VALUES = {
     chess.PAWN: 1.0,
@@ -315,10 +308,9 @@ def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] =
         logger.exception("Strategy analysis failed")
         raise HTTPException(status_code=500, detail="Strategy analysis failed. Check the service logs.") from e
 
-@app.post("/api/v1/extract-page-moves")
+@app.post("/api/v1/extract-page-moves", status_code=202)
 async def extract_page_moves(
-    file: UploadFile = File(...),
-    page: int = Form(...),
+    file: UploadFile = File(...), page: int = Form(...),
     _user: dict[str, Any] = Depends(require_asgardeo_user),
 ):
     try:
@@ -326,40 +318,27 @@ async def extract_page_moves(
             raise HTTPException(status_code=400, detail="Page number must be at least 1.")
         if file.content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
             raise HTTPException(status_code=415, detail="Upload a PDF file.")
-        max_pdf_bytes = int(os.getenv("MAX_PDF_BYTES", str(25 * 1024 * 1024)))
-        content = await file.read(max_pdf_bytes + 1)
-        if len(content) > max_pdf_bytes:
+        limit = int(os.getenv("MAX_PDF_BYTES", str(25 * 1024 * 1024)))
+        content = await file.read(limit + 1)
+        if len(content) > limit:
             raise HTTPException(status_code=413, detail="PDF exceeds the configured upload limit.")
-        doc = fitz.open(stream=content, filetype="pdf")
-        with doc:
-            if page > len(doc):
-                raise HTTPException(status_code=400, detail=f"Page must be between 1 and {len(doc)}.")
-            page_obj = doc[page - 1]
-            text = page_obj.get_text()
-            if len(text.strip()) < 10:
-                pix = page_obj.get_pixmap(dpi=250, colorspace=fitz.csGRAY, alpha=False)
-                img = Image.open(io.BytesIO(pix.tobytes("png")))
-                text = pytesseract.image_to_string(img, config="--psm 6")
+        if b"%PDF-" not in content[:1024]:
+            raise HTTPException(status_code=415, detail="The file is not a PDF.")
+        return await asyncio.to_thread(ocr_jobs.submit, _user["sub"], page, content)
+    except ocr_jobs.QueueFull as error:
+        raise HTTPException(status_code=429, detail=str(error), headers={"Retry-After": "5"}) from error
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.warning("OCR queue unavailable (%s)", type(error).__name__)
+        raise HTTPException(status_code=503, detail="OCR queue is temporarily unavailable.") from error
+    finally:
+        await file.close()
 
-        text = (text
-            .replace("♔", "K").replace("♚", "K")
-            .replace("♕", "Q").replace("♛", "Q")
-            .replace("♖", "R").replace("♜", "R")
-            .replace("♗", "B").replace("♝", "B")
-            .replace("♘", "N").replace("♞", "N")
-            .replace("♙", "").replace("♟", "")
-            .replace("\ufffd", "Q")
-        )
-        text = re.sub(r"t(?:ll|t:l|l)\s*(x?[a-h][1-8])", r"N\1", text, flags=re.IGNORECASE)
-        text = re.sub(r"(^|[\s.])i\.\s*(x?[a-h][1-8])", r"\1B\2", text, flags=re.IGNORECASE)
-        text = re.sub(r"!'W", "Q", text, flags=re.IGNORECASE)
-        text = re.sub(r"\bge[l1]\b", "Re1", text, flags=re.IGNORECASE)
-        text = re.sub(r"[0O]-[0O](-[0O])?", lambda match: match.group(0).replace("0", "O"), text)
-        moves = re.findall(SAN_REGEX, text)
-        logger.info("Extracted %d chess move tokens from PDF page %d", len(moves), page)
-        return {"page": page, "moves": moves}
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise
-        logger.exception("PDF move extraction failed")
-        raise HTTPException(status_code=500, detail="Could not extract chess moves from this PDF page.") from e
+
+@app.get("/api/v1/ocr-jobs/{job_id}")
+def ocr_status(job_id: UUID, _user: dict[str, Any] = Depends(require_asgardeo_user)):
+    job = ocr_jobs.get(job_id, _user["sub"])
+    if job is None:
+        raise HTTPException(status_code=404, detail="OCR job not found or expired.")
+    return job

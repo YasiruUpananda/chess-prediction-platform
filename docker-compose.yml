@@ -59,6 +59,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       PGN_DATA_DIR: /app/data
       MAX_PDF_BYTES: ${MAX_PDF_BYTES:-26214400}
+      OCR_QUEUE_LIMIT: ${OCR_QUEUE_LIMIT:-8}
       ASGARDEO_ISSUER: ${ASGARDEO_ISSUER:?Set ASGARDEO_ISSUER in .env}
       ASGARDEO_JWKS_URL: ${ASGARDEO_JWKS_URL:?Set ASGARDEO_JWKS_URL in .env}
       ASGARDEO_AUDIENCE: ${ASGARDEO_AUDIENCE:?Set ASGARDEO_AUDIENCE in .env}
@@ -101,6 +102,26 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+
+  ocr-worker:
+    build: ./services/ml-engine
+    command: python ocr_worker.py
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-45}
+      OCR_MAX_PIXELS: ${OCR_MAX_PIXELS:-16000000}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; assert time.time()-os.path.getmtime('/tmp/ocr-heartbeat') < 45"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
 
 volumes:
   pgdata:

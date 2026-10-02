@@ -30,4 +30,11 @@ def init_db():
                 lower(player_name), split_part(fen, ' ', 1),
                 split_part(fen, ' ', 2), split_part(fen, ' ', 3)
             );
+            CREATE TABLE IF NOT EXISTS ocr_jobs (
+                id UUID PRIMARY KEY, owner TEXT NOT NULL, page INTEGER NOT NULL,
+                pdf BYTEA, status TEXT NOT NULL DEFAULT 'queued',
+                result JSONB, error TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_ocr_status ON ocr_jobs(status, created_at);
         """)

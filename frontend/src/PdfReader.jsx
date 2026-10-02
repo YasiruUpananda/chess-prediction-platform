@@ -6,7 +6,7 @@ import { Chess } from 'chess.js';
 import { extractSanMoves } from './chessPdf';
 import axios from 'axios';
 import { useAuthContext } from '@asgardeo/auth-react';
-import { API_BASE_URL, getBearerHeaders } from './api';
+import { API_BASE_URL, getBearerHeaders, waitForPoll } from './api';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -58,8 +58,23 @@ export default function PdfReader() {
           const response = await axios.post(`${API_BASE_URL}/api/v1/extract-page-moves`, formData, {
             signal: controller.signal,
             headers: await getBearerHeaders(getAccessToken),
+            timeout: 30000,
           });
-          moves = extractSanMoves((response.data.moves || []).join(' '));
+          const deadline = Date.now() + 10 * 60 * 1000;
+          let job = response.data;
+          while (job.status === 'queued' || job.status === 'running') {
+            if (Date.now() > deadline) throw new Error('OCR is taking too long. Please try this page again later.');
+            if (controller.signal.aborted) return;
+            setMoveStatus(job.status === 'queued' ? 'Page queued for OCR…' : 'Reading this scanned page…');
+            await waitForPoll(controller.signal);
+            const poll = await axios.get(`${API_BASE_URL}/api/v1/ocr-jobs/${job.job_id}`, {
+              signal: controller.signal, timeout: 10000,
+              headers: await getBearerHeaders(getAccessToken),
+            });
+            job = poll.data;
+          }
+          if (job.status !== 'completed') throw new Error(job.error || 'OCR could not process this page.');
+          moves = extractSanMoves((job.result?.moves || []).join(' '));
         }
 
         if (controller.signal.aborted) return;
@@ -70,10 +85,10 @@ export default function PdfReader() {
       } catch (error) {
         if (!controller.signal.aborted) {
           console.error('Failed to extract moves:', error);
-          const detail = error.response?.data?.detail;
+          const detail = error.response?.data?.detail || error.message;
           const status = error.response?.status;
           setMoveStatus(status === 401
-            ? 'Your Asgardeo session expired. Sign in again to use OCR on this scanned page.'
+            ? 'Your sign-in could not be verified. Sign in again to use OCR on this scanned page.'
             : `Could not read this page${status ? ` (API ${status})` : ''}${detail ? `: ${detail}` : '. For a scanned page, check the ML engine and OCR service.'}`);
         }
       } finally {
