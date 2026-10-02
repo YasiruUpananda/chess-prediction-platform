@@ -71,7 +71,7 @@ test('responsive board, keyboard moves and cached player navigation',async({page
   await page.getByRole('button',{name:'Flip board'}).click();
   await noOverflow(page);
   await page.getByRole('link',{name:'Neuro Chess home'}).click();
-  await page.locator('.home-primary-link').click();
+  await page.locator('.home-actions').getByRole('link',{name:'Open prediction engine',exact:true}).click();
   await expect(page.getByLabel('Opponent',{exact:true})).toHaveValue('Alice');
   expect(counts.players).toBe(1);
 });
