@@ -41,8 +41,23 @@ export default function ChessUI() {
   }
 
   return (
-    <div className="board-container" style={{ maxWidth: '600px', margin: '0 auto' }}>
-      <Chessboard position={game.fen()} onPieceDrop={onDrop} />
-    </div>
+    <section className="standalone-board">
+      <div className="standalone-board__heading">
+        <div>
+          <span className="eyebrow">Practice board</span>
+          <h2>Explore a position</h2>
+        </div>
+        <span>AI prediction enabled</span>
+      </div>
+      <div className="standalone-board__frame">
+        <Chessboard
+          position={game.fen()}
+          onPieceDrop={onDrop}
+          customDarkSquareStyle={{ backgroundColor: '#54715b' }}
+          customLightSquareStyle={{ backgroundColor: '#e7e1d1' }}
+        />
+      </div>
+      <p>Make a legal move to send the current position for prediction.</p>
+    </section>
   );
 }
