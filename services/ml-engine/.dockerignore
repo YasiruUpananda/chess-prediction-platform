@@ -10,3 +10,5 @@ venv/
 data/
 *.pgn
 .git/
+benchmarks/
+*.dump

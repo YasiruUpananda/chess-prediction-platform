@@ -36,6 +36,9 @@ yarn-error.log*
 
 # Python generated files
 __pycache__/
+.venv/
+venv/
+*.dump
 *.py[cod]
 
 # vercel

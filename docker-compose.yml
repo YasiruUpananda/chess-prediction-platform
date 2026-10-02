@@ -1,6 +1,7 @@
 services:
   db:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-chess}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
@@ -17,6 +18,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
@@ -44,9 +46,13 @@ services:
       timeout: 5s
       retries: 10
 
-  ml-engine:
-    build: ./services/ml-engine
+  ml-engine: &api-service
+    build:
+      context: ./services/ml-engine
+      target: api
     restart: unless-stopped
+    mem_limit: ${API_MEMORY_LIMIT:-2g}
+    cpus: ${API_CPUS:-2}
     ports:
       - "${ML_ENGINE_PORT:-8000}:8000"
     environment:
@@ -64,6 +70,16 @@ services:
       ASGARDEO_ISSUER: ${ASGARDEO_ISSUER:?Set ASGARDEO_ISSUER in .env}
       ASGARDEO_JWKS_URL: ${ASGARDEO_JWKS_URL:?Set ASGARDEO_JWKS_URL in .env}
       ASGARDEO_AUDIENCE: ${ASGARDEO_AUDIENCE:?Set ASGARDEO_AUDIENCE in .env}
+      DB_POOL_MAX: ${DB_POOL_MAX:-8}
+      VECTOR_DB_POOL_MAX: ${VECTOR_DB_POOL_MAX:-4}
+      OMP_NUM_THREADS: 1
+      INGEST_REQUIRED_SCOPE: ${INGEST_REQUIRED_SCOPE:-chess:ingest}
+      INGEST_REQUIRED_ROLE: ${INGEST_REQUIRED_ROLE:-}
+      INGEST_ROLE_CLAIM: ${INGEST_ROLE_CLAIM:-roles}
+      RATE_REPORTS_PER_MINUTE: ${RATE_REPORTS_PER_MINUTE:-6}
+      RATE_OCR_PER_MINUTE: ${RATE_OCR_PER_MINUTE:-12}
+      RATE_MOVES_PER_MINUTE: ${RATE_MOVES_PER_MINUTE:-60}
+      RATE_INGESTION_PER_MINUTE: ${RATE_INGESTION_PER_MINUTE:-5}
     volumes:
       - ./services/ml-engine/data:/app/data:ro
       - modelcache:/root/.cache/huggingface
@@ -81,14 +97,21 @@ services:
       retries: 5
 
   ml-worker:
-    build: ./services/ml-engine
+    build:
+      context: ./services/ml-engine
+      target: ingestion
     restart: unless-stopped
+    mem_limit: ${INGESTION_MEMORY_LIMIT:-2g}
+    cpus: ${INGESTION_CPUS:-1}
     command: python worker.py
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
       WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
       RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       PGN_DATA_DIR: /app/data
+      DB_POOL_MAX: 2
+      VECTOR_DB_POOL_MAX: 2
+      OMP_NUM_THREADS: 1
     volumes:
       - ./services/ml-engine/data:/app/data:ro
       - modelcache:/root/.cache/huggingface
@@ -105,7 +128,9 @@ services:
         condition: service_healthy
 
   ocr-worker:
-    build: ./services/ml-engine
+    build:
+      context: ./services/ml-engine
+      target: ocr
     command: python ocr_worker.py
     restart: unless-stopped
     mem_limit: 768m
@@ -114,6 +139,7 @@ services:
       WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
       OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-45}
       OCR_MAX_PIXELS: ${OCR_MAX_PIXELS:-16000000}
+      DB_POOL_MAX: 2
     depends_on:
       db:
         condition: service_healthy
@@ -124,7 +150,44 @@ services:
       retries: 3
       start_period: 60s
 
+  backend-tests:
+    <<: *api-service
+    profiles: [test]
+    build:
+      context: ./services/ml-engine
+      target: test
+    restart: "no"
+    ports: []
+    healthcheck:
+      disable: true
+    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "-v"]
+
+  db-backup:
+    image: postgres:16-alpine
+    profiles: [backup]
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-chess}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-chessrag}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    entrypoint: ["sh", "/scripts/backup.sh"]
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./scripts/verify-backup.sh:/scripts/verify-backup.sh:ro
+      - backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /backups/last-success && test $$(($$(date +%s)-$$(cat /backups/last-success))) -lt $$(($$BACKUP_INTERVAL_SECONDS+120))"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
 volumes:
   pgdata:
   rabbitmqdata:
   modelcache:
+  backups:
