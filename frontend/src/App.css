@@ -84,3 +84,7 @@
 .report-statistics code { font-size: 11px; }
 .report-content article { padding: 12px 0; border-bottom: 1px solid #d8ddcf; }
 .report-content a { margin-right: 10px; }
+.reader-board-actions { flex-wrap: wrap; align-items: center; gap: 8px; }
+.reader-field { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; color: #c4d0c8; font-size: 12px; }
+.reader-field textarea, .reader-field select { width: 100%; padding: 9px; border: 1px solid #54715b; border-radius: 6px; background: #111a17; color: #edf2ee; }
+.reader-field textarea { resize: vertical; font-family: ui-monospace, monospace; }

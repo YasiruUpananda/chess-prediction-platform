@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
-import { extractSanMoves } from './chessPdf';
+import { parseChessText, textBlocks, EXTRACTION_VERSION } from './chessPdf';
+import { restoreGame, gameSnapshot } from './gameHistory';
 import axios from 'axios';
 import { useAuthContext } from '@asgardeo/auth-react';
 import { API_BASE_URL, getBearerHeaders, waitForPoll } from './api';
@@ -25,7 +26,22 @@ export default function PdfReader() {
   const [pageWidth, setPageWidth] = useState(680);
   const [pdfError, setPdfError] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
-  const [game, setGame] = useState(() => new Chess());
+  const [initialFen, setInitialFen] = useState(new Chess().fen());
+  const [fenInput, setFenInput] = useState(new Chess().fen());
+  const [timeline, setTimeline] = useState([]);
+  const [cursor, setCursor] = useState(0);
+  const game = useMemo(() => restoreGame(initialFen, timeline.slice(0, cursor)), [initialFen, timeline, cursor]);
+  const [orientation, setOrientation] = useState('white');
+  const [promotion, setPromotion] = useState('q');
+  const [lines, setLines] = useState([]);
+  const [selectedLine, setSelectedLine] = useState(0);
+  const [editor, setEditor] = useState('');
+  const [extractionInfo, setExtractionInfo] = useState(null);
+  const [documentHash, setDocumentHash] = useState('');
+  const [forceOCR, setForceOCR] = useState(false);
+  const [extractionAttempt, setExtractionAttempt] = useState(0);
+  const [pageGeometry, setPageGeometry] = useState(null);
+  const extractionCache = useRef(new Map());
   const [pageMoves, setPageMoves] = useState([]);
   const [moveStatus, setMoveStatus] = useState('Choose a move to play it on the board.');
 
@@ -37,68 +53,99 @@ export default function PdfReader() {
   }, []);
 
   useEffect(() => {
-    if (!pdfFile || !pdfDocument) return undefined;
+    if (!pdfFile) return;
+    let cancelled = false;
+    pdfFile.arrayBuffer().then((bytes) => crypto.subtle.digest('SHA-256', bytes)).then((digest) => {
+      if (!cancelled) setDocumentHash([...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join(''));
+    }).catch(() => { if (!cancelled) setPdfError('Could not identify this document for extraction.'); });
+    return () => { cancelled = true; };
+  }, [pdfFile]);
 
+  useEffect(() => {
+    if (!pdfDocument) return;
+    let cancelled = false;
+    pdfDocument.getPage(pageNumber).then((page) => {
+      const viewport = page.getViewport({ scale: 1 });
+      const height = pageWidth * viewport.height / viewport.width;
+      const safe = Number.isFinite(height) && height > 0 && height <= 8192 &&
+        Math.max(viewport.width, viewport.height) <= 14400 && pageWidth * height * 4 <= 16000000;
+      if (!cancelled) setPageGeometry({ document: pdfDocument, page: pageNumber, width: pageWidth, safe });
+    }).catch(() => { if (!cancelled) setPdfError('Could not read page dimensions.'); });
+    return () => { cancelled = true; };
+  }, [pdfDocument, pageNumber, pageWidth]);
+
+  useEffect(() => {
+    if (!pdfFile || !pdfDocument || !documentHash) return;
     const controller = new AbortController();
+    let renderTask;
+    let canvas;
     const extractMoves = async () => {
-      setIsExtracting(true);
-      setPageMoves([]);
-      setMoveStatus(`Reading chess moves from page ${pageNumber}…`);
-
+      setIsExtracting(true); setPageMoves([]); setLines([]); setEditor(''); setExtractionInfo(null);
+      setMoveStatus(`Reading page ${pageNumber}...`);
       try {
-        const page = await pdfDocument.getPage(pageNumber);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item) => item.str || '').join(' ');
-        let moves = extractSanMoves(pageText);
-
-        if (!moves.length) {
-          const formData = new FormData();
-          formData.append('file', pdfFile);
-          formData.append('page', String(pageNumber));
-          const response = await axios.post(`${API_BASE_URL}/api/v1/extract-page-moves`, formData, {
-            signal: controller.signal,
-            headers: await getBearerHeaders(getAccessToken),
-            timeout: 30000,
-          });
-          const deadline = Date.now() + 10 * 60 * 1000;
-          let job = response.data;
-          while (job.status === 'queued' || job.status === 'running') {
-            if (Date.now() > deadline) throw new Error('OCR is taking too long. Please try this page again later.');
+        const key = `${documentHash}:${pageNumber}:${EXTRACTION_VERSION}:${forceOCR ? 'ocr' : 'text'}`;
+        let extracted = extractionCache.current.get(key);
+        const cached = Boolean(extracted);
+        if (!extracted) {
+          const page = await pdfDocument.getPage(pageNumber);
+          const content = await page.getTextContent();
+          const viewport = page.getViewport({ scale: 1 });
+          const blocks = textBlocks(content.items, viewport.width);
+          const readableText = blocks.map((block) => block.text).join('\n');
+          extracted = { blocks, source: 'PDF text', ocrConfidence: null };
+          if (forceOCR || readableText.trim().length < 10) {
+            // Cap dimensions before allocating a canvas. Only this page leaves the browser.
+            if (!Number.isFinite(viewport.width * viewport.height) || viewport.width <= 0 || viewport.height <= 0 || Math.max(viewport.width, viewport.height) > 14400) {
+              throw new Error('Page dimensions exceed the rendering limit.');
+            }
+            const scale = Math.min(200 / 72, 4000 / Math.max(viewport.width, viewport.height), Math.sqrt(12000000 / (viewport.width * viewport.height)));
+            const imageViewport = page.getViewport({ scale });
+            canvas = document.createElement('canvas');
+            canvas.width = Math.ceil(imageViewport.width); canvas.height = Math.ceil(imageViewport.height);
+            renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport: imageViewport });
+            await renderTask.promise;
             if (controller.signal.aborted) return;
-            setMoveStatus(job.status === 'queued' ? 'Page queued for OCR…' : 'Reading this scanned page…');
-            await waitForPoll(controller.signal);
-            const poll = await axios.get(`${API_BASE_URL}/api/v1/ocr-jobs/${job.job_id}`, {
-              signal: controller.signal, timeout: 10000,
-              headers: await getBearerHeaders(getAccessToken),
-            });
-            job = poll.data;
+            const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+            canvas.width = 0; canvas.height = 0;
+            if (!blob || blob.size > 8 * 1024 * 1024) throw new Error('Page image exceeds the 8 MB OCR upload limit.');
+            const formData = new FormData(); formData.append('file', blob, 'page.png'); formData.append('page', String(pageNumber));
+            let job = (await axios.post(`${API_BASE_URL}/api/v1/extract-page-image`, formData, {
+              signal: controller.signal, headers: await getBearerHeaders(getAccessToken), timeout: 30000,
+            })).data;
+            const deadline = Date.now() + 3 * 60 * 1000;
+            while (job.status === 'queued' || job.status === 'running') {
+              if (Date.now() > deadline) throw new Error('OCR is taking too long. Try this page again later.');
+              setMoveStatus(job.status === 'queued' ? 'Page queued for OCR...' : 'Reading this page image...');
+              await waitForPoll(controller.signal);
+              job = (await axios.get(`${API_BASE_URL}/api/v1/ocr-jobs/${job.job_id}`, {
+                signal: controller.signal, timeout: 10000, headers: await getBearerHeaders(getAccessToken),
+              })).data;
+            }
+            if (job.status !== 'completed') throw new Error(job.error || 'OCR could not process this page.');
+            const items = (job.result.text_items || []).map((item) => ({ ...item, transform: [1, 0, 0, item.height, item.x, -item.y] }));
+            extracted = { blocks: items.length ? textBlocks(items, canvas?.width || imageViewport.width) : [{ column: 1, text: job.result.text || '' }],
+              source: 'Page image OCR', ocrConfidence: job.result.ocr_confidence };
           }
-          if (job.status !== 'completed') throw new Error(job.error || 'OCR could not process this page.');
-          moves = extractSanMoves((job.result?.moves || []).join(' '));
+          if (controller.signal.aborted) return;
+          extractionCache.current.set(key, extracted);
+          while (extractionCache.current.size > 40) extractionCache.current.delete(extractionCache.current.keys().next().value);
         }
-
         if (controller.signal.aborted) return;
-        setPageMoves(moves);
-        setMoveStatus(moves.length
-          ? `${moves.length} chess moves found on this page. Choose a move to build the position.`
-          : 'No readable chess moves found. Scanned pages need the ML engine and OCR configured.');
+        const found = extracted.blocks.flatMap((block) => parseChessText(block.text, initialFen).map((line) => ({ ...line, column: block.column })));
+        setLines(found); setSelectedLine(0); setPageMoves(found[0]?.moves || []);
+        setEditor(found[0]?.raw || extracted.blocks.map((block) => block.text).join('\n'));
+        setExtractionInfo({ ...extracted, cached, confidence: found[0]?.confidence || 'low', issue: found[0]?.issue || '' });
+        setMoveStatus(found.length ? `${found.length} lines found. Review a line and its starting position before replaying.` : 'No numbered chess line found. You can correct the text or try page OCR.');
       } catch (error) {
-        if (!controller.signal.aborted) {
-          console.error('Failed to extract moves:', error);
-          const detail = error.response?.data?.detail || error.message;
-          const status = error.response?.status;
-          setMoveStatus(status === 401
-            ? 'Your sign-in could not be verified. Sign in again to use OCR on this scanned page.'
-            : `Could not read this page${status ? ` (API ${status})` : ''}${detail ? `: ${detail}` : '. For a scanned page, check the ML engine and OCR service.'}`);
-        }
+        if (!controller.signal.aborted) setMoveStatus(`Could not read this page: ${error.response?.data?.detail || error.message}`);
       } finally {
+        if (canvas) { canvas.width = 0; canvas.height = 0; }
         if (!controller.signal.aborted) setIsExtracting(false);
       }
     };
-
     extractMoves();
-    return () => controller.abort();
-  }, [getAccessToken, pageNumber, pdfDocument, pdfFile]);
+    return () => { controller.abort(); renderTask?.cancel(); };
+  }, [getAccessToken, pageNumber, pdfDocument, pdfFile, documentHash, initialFen, forceOCR, extractionAttempt]);
 
   function onFileChange(event) {
     const file = event.target.files?.[0];
@@ -108,6 +155,8 @@ export default function PdfReader() {
       event.target.value = '';
       return;
     }
+    if (file.size > 200 * 1024 * 1024) { setPdfError('Choose a PDF smaller than 200 MB.'); return; }
+    setDocumentHash(''); setForceOCR(false); setLines([]); setEditor(''); setExtractionInfo(null);
     setPdfError('');
     setPdfDocument(null);
     setPageMoves([]);
@@ -124,53 +173,51 @@ export default function PdfReader() {
     setPdfError('');
   }
 
-  function onDrop(sourceSquare, targetSquare) {
-    const nextGame = new Chess(game.fen());
+  function commitMove(move) {
+    const nextGame = restoreGame(initialFen, timeline.slice(0, cursor));
     try {
-      const move = nextGame.move({ from: sourceSquare, to: targetSquare, promotion: 'q' });
-      if (!move) return false;
-      setGame(nextGame);
-      setMoveStatus(`Played ${move.san}.`);
-      return true;
-    } catch {
-      return false;
-    }
+      const played = nextGame.move(move);
+      const snapshot = gameSnapshot(nextGame);
+      setTimeline(snapshot.moves); setCursor(snapshot.moves.length);
+      setMoveStatus(`Played ${played.san}.`); return true;
+    } catch { setMoveStatus('This move is illegal from the current position.'); return false; }
   }
 
-  function handlePlayMove(sanMove) {
-    const nextGame = new Chess(game.fen());
-    try {
-      const move = nextGame.move(sanMove);
-      if (!move) {
-        setMoveStatus(`That move is not legal from the current position: ${sanMove}`);
-        return;
-      }
-      setGame(nextGame);
-      setMoveStatus(`Played ${move.san}.`);
-    } catch {
-      setMoveStatus(`Could not read this move: ${sanMove}`);
-    }
-  }
-
+  function onDrop(from, to) { return commitMove({ from, to, promotion }); }
+  function handlePlayMove(san) { commitMove(san); }
   function handleReplayMoves() {
-    const nextGame = new Chess();
-    let played = 0;
-    for (const sanMove of pageMoves) {
-      try {
-        nextGame.move(sanMove);
-        played += 1;
-      } catch {
-        // A book page can contain alternate lines. Stop at the first move that
-        // does not continue the current line so the board stays at a legal position.
-        break;
-      }
-    }
-    setGame(nextGame);
-    setMoveStatus(played ? `Played ${played} consecutive moves from the starting position.` : 'These moves do not form a legal line from the starting position. Choose individual moves instead.');
+    const nextGame = new Chess(initialFen);
+    for (const san of pageMoves) nextGame.move(san);
+    const snapshot = gameSnapshot(nextGame);
+    setTimeline(snapshot.moves); setCursor(0);
+    setMoveStatus(`Loaded ${snapshot.moves.length} moves. Use Next move to step through this line.`);
+  }
+  function selectLine(index) {
+    const line = lines[index]; setSelectedLine(index); setPageMoves(line.moves); setEditor(line.raw);
+    setExtractionInfo((info) => ({ ...info, confidence: line.confidence, issue: line.issue }));
+  }
+  function correctLine() {
+    try {
+      const corrected = parseChessText(editor, initialFen, true);
+      if (!corrected.length) { setMoveStatus('Enter SAN moves, for example: e4 e5 Nf3 Nc6.'); return; }
+      setLines(corrected.map((line) => ({ ...line, column: 1 }))); setSelectedLine(0);
+      setPageMoves(corrected[0].moves);
+      setExtractionInfo((info) => ({ ...info, confidence: corrected[0].confidence, issue: corrected[0].issue }));
+      setMoveStatus(corrected[0].issue || 'Corrections validated. Load the line to replay it.');
+    } catch (error) { setMoveStatus(error.message); }
+  }
+  function applyFen(fen) {
+    try { const board = new Chess(fen); setInitialFen(board.fen()); setFenInput(board.fen()); setTimeline([]); setCursor(0); setMoveStatus('Starting position updated.'); }
+    catch { setMoveStatus('Invalid FEN. Check the position and side to move.'); }
+  }
+  function exportPgn() {
+    const url = URL.createObjectURL(new Blob([game.pgn()], { type: 'application/x-chess-pgn' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'book-study.pgn'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function clearPdf() {
-    setPdfFile(null);
+    setPdfFile(null); setDocumentHash(''); setLines([]); setEditor(''); setExtractionInfo(null); setForceOCR(false); setIsExtracting(false);
     setPdfDocument(null);
     setNumPages(0);
     setPageNumber(1);
@@ -215,9 +262,9 @@ export default function PdfReader() {
           ) : (
             <>
               <div className="pdf-toolbar">
-                <button className="reader-secondary-button" type="button" onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber <= 1}>← Previous</button>
+                <button className="reader-secondary-button" type="button" onClick={() => { setForceOCR(false); setPageNumber((page) => Math.max(1, page - 1)); }} disabled={pageNumber <= 1}>← Previous</button>
                 <span>Page <b>{pageNumber}</b> of <b>{numPages || '…'}</b></span>
-                <button className="reader-secondary-button" type="button" onClick={() => setPageNumber((page) => Math.min(numPages, page + 1))} disabled={!numPages || pageNumber >= numPages}>Next →</button>
+                <button className="reader-secondary-button" type="button" onClick={() => { setForceOCR(false); setPageNumber((page) => Math.min(numPages, page + 1)); }} disabled={!numPages || pageNumber >= numPages}>Next →</button>
               </div>
               <div className="pdf-page-stage">
                 <Document
@@ -228,7 +275,10 @@ export default function PdfReader() {
                   error={<div className="reader-placeholder">This PDF could not be opened. Try another file.</div>}
                   noData={<div className="reader-placeholder">Choose a PDF to begin reading.</div>}
                 >
-                  <Page pageNumber={pageNumber} width={pageWidth} renderAnnotationLayer renderTextLayer />
+                  {pageGeometry?.document === pdfDocument && pageGeometry.page === pageNumber && pageGeometry.width === pageWidth
+                    ? pageGeometry.safe ? <Page pageNumber={pageNumber} width={pageWidth} devicePixelRatio={Math.min(2, window.devicePixelRatio || 1)} renderAnnotationLayer renderTextLayer />
+                      : <p className="reader-error">Page dimensions exceed the rendering limit.</p>
+                    : <div className="reader-placeholder">Checking page dimensions...</div>}
                 </Document>
               </div>
             </>
@@ -240,15 +290,40 @@ export default function PdfReader() {
           <section className="reader-board-card panel">
             <div className="reader-panel-heading"><div><span className="eyebrow">Interactive board</span><h2>Try the position</h2></div><span className="reader-turn">{game.turn() === 'w' ? 'White to move' : 'Black to move'}</span></div>
             <div className="reader-board-frame">
-              <Chessboard position={game.fen()} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#54715b' }} customLightSquareStyle={{ backgroundColor: '#e7e1d1' }} />
+              <Chessboard position={game.fen()} boardOrientation={orientation} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#54715b' }} customLightSquareStyle={{ backgroundColor: '#e7e1d1' }} />
             </div>
             <p className="reader-status" aria-live="polite">{moveStatus}</p>
-            <div className="reader-board-actions"><button className="reader-secondary-button" type="button" onClick={() => { setGame(new Chess()); setMoveStatus('Board reset to the starting position.'); }}>Reset board</button></div>
+            <div className="reader-board-actions">
+              <button className="reader-secondary-button" onClick={() => setCursor(Math.max(0, cursor - 1))} disabled={!cursor}>Previous move</button>
+              <span>{cursor} / {timeline.length}</span>
+              <button className="reader-secondary-button" onClick={() => setCursor(Math.min(timeline.length, cursor + 1))} disabled={cursor >= timeline.length}>Next move</button>
+              <button className="reader-secondary-button" onClick={() => { setTimeline(timeline.slice(0, cursor - 1)); setCursor(cursor - 1); }} disabled={!cursor}>Undo move</button>
+              <button className="reader-secondary-button" onClick={() => setOrientation(orientation === 'white' ? 'black' : 'white')}>Flip board</button>
+              <button className="reader-secondary-button" onClick={() => { setTimeline([]); setCursor(0); }}>Reset board</button>
+              <button className="reader-secondary-button" onClick={exportPgn}>Export current PGN</button>
+            </div>
+            <label className="reader-field">Promote pawn to<select value={promotion} onChange={(event) => setPromotion(event.target.value)}>
+              <option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option>
+            </select></label>
+            <label className="reader-field">Starting position FEN<textarea value={fenInput} maxLength={120} onChange={(event) => setFenInput(event.target.value)} /></label>
+            <div className="reader-board-actions"><button className="reader-secondary-button" onClick={() => applyFen(fenInput)}>Apply FEN</button>
+              <button className="reader-secondary-button" onClick={() => applyFen(game.fen())}>Use current board as start</button>
+              <button className="reader-secondary-button" onClick={() => applyFen(new Chess().fen())}>Standard start</button></div>
           </section>
 
           <section className="reader-moves-card panel">
             <div className="reader-panel-heading"><div><span className="eyebrow">Page analysis</span><h2>Moves on this page</h2></div><span className="reader-page-count">{isExtracting ? 'Reading…' : pageMoves.length}</span></div>
-            {pageMoves.length > 0 && <button className="reader-secondary-button reader-replay-button" type="button" onClick={handleReplayMoves}>Play consecutive line from start</button>}
+            <p className="reader-empty-state">Text extraction stays in your browser. OCR sends only the selected page image.</p>
+            {lines.length > 0 && <label className="reader-field">Choose main line or variation<select value={selectedLine} onChange={(event) => selectLine(Number(event.target.value))}>
+              {lines.map((line, index) => <option key={index} value={index}>Column {line.column} ? {line.variation ? 'Variation' : 'Main line'} {index + 1} ? {line.moves.length}/{line.candidates} legal moves</option>)}
+            </select></label>}
+            {extractionInfo && <p className="reader-status">{extractionInfo.source}{extractionInfo.cached ? ' ? cached' : ''} ? Line validation: {extractionInfo.confidence}.
+              {extractionInfo.ocrConfidence != null && ` OCR word confidence: ${Math.round(extractionInfo.ocrConfidence)}%.`}
+              {' '}These are extraction checks, not a probability of correct book analysis. {extractionInfo.issue}</p>}
+            {pdfFile && <><label className="reader-field">Review and correct moves<textarea rows={5} value={editor} onChange={(event) => setEditor(event.target.value)} maxLength={50000} /></label>
+              <div className="reader-board-actions"><button className="reader-secondary-button" onClick={correctLine} disabled={isExtracting}>Validate corrections</button>
+                <button className="reader-secondary-button" onClick={() => { setForceOCR(true); setExtractionAttempt((attempt) => attempt + 1); }} disabled={isExtracting}>Try page OCR</button></div></>}
+            {pageMoves.length > 0 && <button className="reader-secondary-button reader-replay-button" type="button" onClick={handleReplayMoves}>Load reviewed line</button>}
             {!pdfFile ? <p className="reader-empty-state">Open a PDF to find chess moves on each page.</p> : pageMoves.length ? (
               <div className="reader-move-list">{pageMoves.map((move, index) => <button className="reader-move-chip" type="button" key={`${move}-${index}`} onClick={() => handlePlayMove(move)}>{move}</button>)}</div>
             ) : <p className="reader-empty-state">{isExtracting ? 'Checking the page text and scanned image…' : 'No valid move tokens found on this page.'}</p>}
