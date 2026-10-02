@@ -57,8 +57,8 @@ async def startup_event():
     global redis_client
     await asyncio.to_thread(init_db)
     try:
-        redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
-        await redis_client.ping()
+        redis_client = aioredis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=0.25, socket_timeout=0.25, retry_on_timeout=False)
+        await asyncio.wait_for(redis_client.ping(), timeout=0.3)
         logger.info("Connected to Redis")
     except Exception as e:
         logger.warning("Redis unavailable; continuing without cache: %s", e)
@@ -66,7 +66,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     if redis_client:
-        await redis_client.close()
+        await redis_client.aclose()
 
 # --- Pydantic Request & Response Schemas ---
 class MovePredictionRequest(BaseModel):
@@ -225,13 +225,16 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
             raise HTTPException(status_code=400, detail="Game is already over.")
 
         opponent = request.opponent_username or "Opponent"
-        cache_key = f"move:{opponent.casefold()}:{board.fen()}"
+        cache_key = f"move:v2:{opponent.casefold()}:{board.fen()}"
         if redis_client:
-            cached_data = await redis_client.get(cache_key)
-            if cached_data:
-                cached_res = json.loads(cached_data)
-                cached_res["cached"] = True
-                return cached_res
+            try:
+                cached_data = await asyncio.wait_for(redis_client.get(cache_key), timeout=0.3)
+                if cached_data:
+                    cached_res = MovePredictionResponse(**json.loads(cached_data)).model_dump()
+                    cached_res["cached"] = True
+                    return cached_res
+            except Exception as error:
+                logger.warning("Cache read skipped (%s)", type(error).__name__)
 
         scored_moves = score_legal_moves(board)
         try:
@@ -261,9 +264,12 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
             "cached": False,
         }
 
-        # Save to Redis Cache (Expire in 1 hour)
+        # Brief TTL lets newly ingested history become visible quickly.
         if redis_client:
-            await redis_client.setex(cache_key, 3600, json.dumps(response_data))
+            try:
+                await asyncio.wait_for(redis_client.setex(cache_key, 60, json.dumps(response_data)), timeout=0.3)
+            except Exception as error:
+                logger.warning("Cache write skipped (%s)", type(error).__name__)
 
         return response_data
     except HTTPException:
