@@ -1,0 +1,95 @@
+[
+  {
+    "file": "assets/index-BBrUxDlp.js",
+    "entry": true,
+    "imports": [],
+    "dynamicImports": [
+      "assets/Home-Dvc4lCcZ.js",
+      "assets/Dashboard-CoIBsgpJ.js",
+      "assets/PdfReader-CGM_--A0.js"
+    ],
+    "bytes": 902467,
+    "gzip": 276824,
+    "packages": {
+      "@asgardeo/auth-react": 800410,
+      "react-dom": 536767,
+      "react-router": 91854,
+      "immer": 20380,
+      "react": 17246,
+      "@reduxjs/toolkit": 16416,
+      "application": 11648,
+      "scheduler": 9252,
+      "react-redux": 6818,
+      "redux": 6665,
+      "use-sync-external-store": 2585,
+      "redux-thunk": 408
+    }
+  },
+  {
+    "file": "assets/Dashboard-CoIBsgpJ.js",
+    "entry": false,
+    "imports": [
+      "assets/index-BBrUxDlp.js",
+      "assets/gameHistory-Cmf5srFM.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 15638,
+    "gzip": 5385,
+    "packages": {
+      "application": 31623
+    }
+  },
+  {
+    "file": "assets/Home-Dvc4lCcZ.js",
+    "entry": false,
+    "imports": [
+      "assets/index-BBrUxDlp.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 3633,
+    "gzip": 1175,
+    "packages": {
+      "application": 7337
+    }
+  },
+  {
+    "file": "assets/PdfReader-CGM_--A0.js",
+    "entry": false,
+    "imports": [
+      "assets/index-BBrUxDlp.js",
+      "assets/gameHistory-Cmf5srFM.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 648035,
+    "gzip": 194238,
+    "packages": {
+      "pdfjs-dist": 1049247,
+      "react-pdf": 50657,
+      "application": 33239,
+      "es-toolkit": 6573,
+      "make-event-props": 2421,
+      "dequal": 1884,
+      "warning": 1074,
+      "merge-refs": 597,
+      "clsx": 531,
+      "make-cancellable-promise": 360,
+      "tiny-invariant": 204
+    }
+  },
+  {
+    "file": "assets/gameHistory-Cmf5srFM.js",
+    "entry": false,
+    "imports": [
+      "assets/index-BBrUxDlp.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 181734,
+    "gzip": 55754,
+    "packages": {
+      "react-chessboard": 164231,
+      "axios": 106235,
+      "chess.js": 70270,
+      "application": 1745
+    }
+  }
+]

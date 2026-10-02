@@ -1,0 +1,154 @@
+[
+  {
+    "file": "assets/index-DQF_Qa25.js",
+    "entry": true,
+    "imports": [],
+    "dynamicImports": [
+      "assets/SdkSession-Bw0LBNlV.js",
+      "assets/Home-8wS1joGd.js",
+      "assets/Dashboard-Cog9lTXL.js",
+      "assets/PdfReader-aFBNPIyu.js",
+      "assets/WorkspaceProvider-coWGs8PG.js"
+    ],
+    "bytes": 265038,
+    "gzip": 83552,
+    "packages": {
+      "react-dom": 536767,
+      "react-router": 91848,
+      "react": 17246,
+      "application": 15586,
+      "scheduler": 9252
+    }
+  },
+  {
+    "file": "assets/Dashboard-Cog9lTXL.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js",
+      "assets/chessApi-Dy8SrKd9.js",
+      "assets/gameHistory-DXvx7iVo.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 17062,
+    "gzip": 5793,
+    "packages": {
+      "application": 34594
+    }
+  },
+  {
+    "file": "assets/Home-8wS1joGd.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 3690,
+    "gzip": 1176,
+    "packages": {
+      "application": 7524
+    }
+  },
+  {
+    "file": "assets/PdfDocumentView-yR-9Svsl.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 631674,
+    "gzip": 188851,
+    "packages": {
+      "pdfjs-dist": 1049247,
+      "react-pdf": 50547,
+      "es-toolkit": 6573,
+      "make-event-props": 2421,
+      "dequal": 1884,
+      "warning": 1074,
+      "application": 1039,
+      "merge-refs": 597,
+      "clsx": 531,
+      "make-cancellable-promise": 360,
+      "tiny-invariant": 204
+    }
+  },
+  {
+    "file": "assets/PdfReader-aFBNPIyu.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js",
+      "assets/gameHistory-DXvx7iVo.js"
+    ],
+    "dynamicImports": [
+      "assets/PdfDocumentView-yR-9Svsl.js"
+    ],
+    "bytes": 17209,
+    "gzip": 6253,
+    "packages": {
+      "application": 33666
+    }
+  },
+  {
+    "file": "assets/SdkSession-Bw0LBNlV.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 617480,
+    "gzip": 185816,
+    "packages": {
+      "@asgardeo/auth-react": 800410,
+      "application": 1822
+    }
+  },
+  {
+    "file": "assets/WorkspaceProvider-coWGs8PG.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js",
+      "assets/chessApi-Dy8SrKd9.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 455,
+    "gzip": 315,
+    "packages": {
+      "application": 816
+    }
+  },
+  {
+    "file": "assets/chessApi-Dy8SrKd9.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 73666,
+    "gzip": 24496,
+    "packages": {
+      "@reduxjs/toolkit": 114280,
+      "immer": 27854,
+      "react-redux": 7520,
+      "reselect": 6954,
+      "redux": 6665,
+      "application": 3289,
+      "use-sync-external-store": 2585,
+      "redux-thunk": 408,
+      "@standard-schema/utils": 232
+    }
+  },
+  {
+    "file": "assets/gameHistory-DXvx7iVo.js",
+    "entry": false,
+    "imports": [
+      "assets/index-DQF_Qa25.js"
+    ],
+    "dynamicImports": [],
+    "bytes": 131381,
+    "gzip": 37289,
+    "packages": {
+      "react-chessboard": 164220,
+      "chess.js": 70270,
+      "application": 1606
+    }
+  }
+]
