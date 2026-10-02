@@ -4,6 +4,28 @@ import { Chess } from 'chess.js';
 import { parseChessText, extractSanMoves, textBlocks } from './chessPdf.js';
 import { restoreGame, gameSnapshot } from './gameHistory.js';
 
+const bookLine='1.c4 c6 2.e4 d5 3.exd5 ♘f6 4.♘c3 cxd5 5.cxd5 ♘xd5 6.♘f3 e6 7.♗c4 ♘c6 8.0-0 ♗e7 9.d4 0-0 10.♖e1 ♘f6';
+test('the supplied book line retains all ten white and black moves',()=>{
+  const line=parseChessText(bookLine)[0];
+  assert.equal(line.moves.length,20);
+  assert.equal(line.candidates,20);
+  assert.equal(line.issue,'');
+  assert.equal(line.moves.at(-1),'Nf6');
+  assert.equal(parseChessText(bookLine.replace('exd5 ♘f6','exd5♘f6'))[0].moves.length,20);
+  assert.equal(parseChessText(bookLine.replaceAll('♘','♘ '))[0].moves.length,20);
+});
+
+test('unknown PDF font glyphs cannot turn a truncated prefix into high confidence',()=>{
+  for(const glyph of ['¤','\uFFFD','\uE123','§','X']) {
+    const line=parseChessText(bookLine.replace('♘f6',`${glyph}${glyph==='X'?'':' '}f6`))[0];
+    assert.equal(line.moves.length,5);
+    assert.equal(line.candidates,20);
+    assert.equal(line.confidence,'low');
+    assert.match(line.issue,/Unrecognized PDF piece symbol/);
+    assert.match(line.raw,/Re1 Nf6$/);
+  }
+});
+
 test('numbered main line excludes nested variations, comments and annotations', () => {
   assert.deepEqual(extractSanMoves('1. e4 e5 2. Nf3 Nc6'), ['e4','e5','Nf3','Nc6']);
   assert.deepEqual(extractSanMoves('1.e4 (1.d4 d5) e5 2.Nf3'), ['e4','e5','Nf3']);

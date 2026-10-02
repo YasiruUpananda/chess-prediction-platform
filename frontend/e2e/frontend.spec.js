@@ -141,7 +141,7 @@ test('selecting a PDF loads its worker and extracts the numbered line', async ({
   const requested=[]; page.on('request',(request)=>requested.push(request.url()));
   await page.goto('/reader');
   // Small valid PDF created here avoids external fixtures or downloads.
-  const text='BT /F1 18 Tf 30 160 Td (1. e4 e5 2. Nf3 Nc6) Tj ET';
+  const text='BT /F1 10 Tf 10 160 Td (1.c4 c6 2.e4 d5 3.exd5 Nf6 4.Nc3 cxd5) Tj 0 -20 Td (5.cxd5 Nxd5 6.Nf3 e6 7.Bc4 Nc6 8.O-O Be7) Tj 0 -20 Td (9.d4 O-O 10.Re1 Nf6) Tj ET';
   const objects=[
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -155,7 +155,10 @@ test('selecting a PDF loads its worker and extracts the numbered line', async ({
   pdf+=`xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map((offset)=>String(offset).padStart(10,'0')+' 00000 n ').join('\n')}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   await page.locator('input[type=file]').setInputFiles({name:'study.pdf',mimeType:'application/pdf',buffer:Buffer.from(pdf)});
   await expect(page.locator('.react-pdf__Page canvas')).toBeVisible();
-  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+  await expect(page.locator('.reader-move-chip')).toHaveCount(20);
+  await expect(page.getByLabel('Choose main line or variation')).toContainText('20/20 validated plies');
+  await page.getByRole('button',{name:'Load reviewed line'}).click();
+  await expect(page.getByRole('button',{name:'Next move',exact:true})).toBeEnabled();
   expect(requested.some((url)=>url.includes('pdf.worker'))).toBeTruthy();
   await noOverflow(page);
 });

@@ -1,6 +1,8 @@
 ﻿import { Chess } from 'chess.js';
-export const EXTRACTION_VERSION = 'layout-rav-v2';
+export const EXTRACTION_VERSION = 'layout-rav-v3';
 const SAN = /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)$/;
+const UNKNOWN_GLYPH = /[\uFFFD\uE000-\uF8FF¤]/;
+const unreadableMove = (token) => UNKNOWN_GLYPH.test(token) || (!SAN.test(token) && /^[^\s]+[a-h][1-8][+#]?$/.test(token));
 
 export function normalizeChessText(text) {
   return text.replace(/[♔♚]/g, 'K').replace(/[♕♛]/g, 'Q').replace(/[♖♜]/g, 'R')
@@ -8,7 +10,10 @@ export function normalizeChessText(text) {
     .replace(/[0O]-[0O](-[0O])?/g, (castle) => castle.replace(/0/g, 'O'))
     .replace(/(\d+)\s*\.\s*\.\s*\./g, '$1...')
     .replace(/(\d)\s+(\.)/g, '$1$2')
-    .replace(/\b([KQRBN])\s+([a-h][1-8])/g, '$1$2');
+    .replace(/\b([KQRBN])\s+(?=[a-h1-8x]*[a-h][1-8])/g, '$1')
+    // PDF text runs can concatenate a pawn move and a figurine move.
+    .replace(/([a-h][1-8](?:=[QRBN])?[+#]?)(?=[KQRBN][a-h1-8x]*[a-h][1-8])/g, '$1 ')
+    .replace(/([^\p{L}\p{N}\s.(){}!?=+#$-])\s+(?=[a-h1-8x]*[a-h][1-8])/gu, '$1');
 }
 
 // Keep positions rather than joining PDF items in arbitrary extraction order.
@@ -73,7 +78,7 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
       continue;
     }
     token = token.replace(/[!?]+$/g, '').replace(/[.,]+$/g, '');
-    if (SAN.test(token) && active) {
+    if ((SAN.test(token) || unreadableMove(token)) && active) {
       if (!current) current = newLine();
       current.steps.push({ san: token, ...pendingNumber });
       pendingNumber = null;
@@ -88,6 +93,10 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
     for (const step of line.steps) {
       if (step.number && (game.moveNumber() !== step.number || game.turn() !== step.turn)) {
         issue = `Move ${step.number}${step.turn === 'b' ? '...' : '.'} does not match the starting position. Set the book position FEN.`;
+        break;
+      }
+      if (unreadableMove(step.san)) {
+        issue = `Unrecognized PDF piece symbol in "${step.san}" after ${moves.length} plies. Correct it to K, Q, R, B or N, or try page OCR. The rest of the line has been retained.`;
         break;
       }
       try { moves.push(game.move(step.san).san); }
