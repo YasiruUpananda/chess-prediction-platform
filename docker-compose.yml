@@ -203,6 +203,22 @@ services:
       disable: true
     command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "test_product", "test_measurements", "-v"]
 
+  browser-api:
+    <<: *api-service
+    profiles: [test]
+    build:
+      context: ./services/ml-engine
+      target: test
+    command: python test_auth_server.py
+    restart: "no"
+    ports:
+      - "127.0.0.1:8011:8011"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8011/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   db-backup:
     image: postgres:16-alpine
     profiles: [backup]
