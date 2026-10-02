@@ -98,6 +98,33 @@ class MovePredictionRequest(BaseModel):
     moves: Optional[list[str]] = Field(default=None, max_length=1500)
 
 
+class MoveCandidate(BaseModel):
+    san: str
+    uci: str
+    probability: float
+    observed_games: int
+
+
+class EngineLine(BaseModel):
+    uci: str
+    san: str
+    score_white_cp: Optional[int] = None
+    mate_white: Optional[int] = None
+    depth: int = 0
+
+
+class EngineEvaluation(BaseModel):
+    status: Literal['available', 'unavailable'] = 'unavailable'
+    name: str = 'Stockfish 18'
+    cached: bool = False
+    best: Optional[EngineLine] = None
+    alternatives: list[EngineLine] = Field(default_factory=list)
+    predicted_move: Optional[EngineLine] = None
+    score_perspective: Literal['white'] = 'white'
+    time_limit_ms: Optional[int] = None
+    node_limit: Optional[int] = None
+
+
 class MovePredictionResponse(BaseModel):
     success: bool
     opponent: str
@@ -112,8 +139,8 @@ class MovePredictionResponse(BaseModel):
     matching_games: int = 0
     observed_games: int = 0
     history_weight: float = 0
-    candidates: list[dict[str, Any]] = Field(default_factory=list)
-    engine: dict[str, Any] = Field(default_factory=dict)
+    candidates: list[MoveCandidate] = Field(default_factory=list)
+    engine: EngineEvaluation = Field(default_factory=EngineEvaluation)
     game_over: bool = False
     outcome: Optional[str] = None
     draw_claim_available: bool = False
@@ -126,11 +153,34 @@ class StrategyPredictionRequest(BaseModel):
     color: Literal["any", "white", "black"] = "any"
 
 
+class SourceGame(BaseModel):
+    id: str
+    white: str
+    black: str
+    event: str
+    date: str
+    result: str
+    eco: str
+    timecontrol: str
+    pgn: str
+
+
+class GameStatistic(BaseModel):
+    id: str
+    type: Literal['sample', 'result', 'opening', 'position']
+    games: int
+    game_ids: list[str]
+    color: Optional[str] = None
+    result: Optional[str] = None
+    line: Optional[str] = None
+    position_key: Optional[str] = None
+
+
 class StrategyPredictionResponse(BaseModel):
     opponent: str
     report: StrategyReport
-    sources: list[dict[str, Any]]
-    statistics: list[dict[str, Any]]
+    sources: list[SourceGame]
+    statistics: list[GameStatistic]
     supporting_games: int
     available_games: int
     cached: bool = False
@@ -205,7 +255,14 @@ def operational_status(_user: dict[str, Any] = Depends(require_ingestion_permiss
             'ingestion_queues': queue_counts}
 
 
-@app.get("/api/v1/players")
+class PlayerSummary(BaseModel):
+    name: str
+    games: int
+
+class PlayersResponse(BaseModel):
+    players: list[PlayerSummary]
+
+@app.get("/api/v1/players", response_model=PlayersResponse)
 def available_players(_user: dict[str, Any] = Depends(require_asgardeo_user)):
     with connect() as db:
         rows = db.execute("""SELECT min(name), count(DISTINCT id) FROM (
@@ -366,7 +423,33 @@ async def stream_strategy(request: StrategyPredictionRequest,
     return StreamingResponse(events(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
-@app.post("/api/v1/extract-page-moves", status_code=202)
+class OcrTextItem(BaseModel):
+    str: str
+    x: float
+    y: float
+    width: float
+    height: float
+    confidence: float = 0
+
+
+class OcrResult(BaseModel):
+    page: int
+    moves: list[str]
+    text: str
+    text_items: list[OcrTextItem]
+    ocr_confidence: float
+    extraction_version: str
+
+
+class OcrJobResponse(BaseModel):
+    job_id: str
+    status: Literal['queued', 'running', 'completed', 'failed']
+    result: Optional[OcrResult] = None
+    error: Optional[str] = None
+    cached: Optional[bool] = None
+
+
+@app.post("/api/v1/extract-page-moves", status_code=202, response_model=OcrJobResponse)
 async def extract_page_moves(
     file: UploadFile = File(...), page: int = Form(...),
     _user: dict[str, Any] = Depends(ocr_user),
@@ -394,7 +477,7 @@ async def extract_page_moves(
         await file.close()
 
 
-@app.get("/api/v1/ocr-jobs/{job_id}")
+@app.get("/api/v1/ocr-jobs/{job_id}", response_model=OcrJobResponse)
 def ocr_status(job_id: UUID, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     job = ocr_jobs.get(job_id, _user["sub"])
     if job is None:
@@ -402,7 +485,7 @@ def ocr_status(job_id: UUID, _user: dict[str, Any] = Depends(require_asgardeo_us
     return job
 
 
-@app.post("/api/v1/extract-page-image", status_code=202)
+@app.post("/api/v1/extract-page-image", status_code=202, response_model=OcrJobResponse)
 async def extract_page_image(file: UploadFile = File(...), page: int = Form(...),
                              _user: dict[str, Any] = Depends(ocr_user)):
     try:

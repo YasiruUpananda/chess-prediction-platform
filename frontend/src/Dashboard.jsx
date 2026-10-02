@@ -12,9 +12,11 @@ import {
   setError,
 } from './store/chessSlice';
 import ResponsiveBoard from './ResponsiveBoard';
+import ReportContent from './ReportContent';
 import { Chess } from 'chess.js';
 import { useSession } from './sessionContext';
-import { requestJson, authenticatedRequest, friendlyError } from './api';
+import { authenticatedRequest, friendlyError } from './api';
+import { predictMove } from './apiClient';
 import { useGetPlayersQuery } from './store/chessApi';
 import { createRequestGate } from './requestGate';
 import { readReportStream } from './reportStream';
@@ -39,14 +41,6 @@ function Statistics({ statistics }) {
       <details><summary>Source game references</summary>{stat.game_ids?.map((id) => <code key={id}>{id}<br /></code>)}</details>
     </li>)}</ul>
   </details>;
-}
-
-function ReportContent({ content, sources }) {
-  return <div className="report-content">{content.length ? content.map((claim, index) => <article key={index}>
-    <p>{claim.text}</p><small>{claim.confidence === 'tentative' ? 'Tentative inference' : 'Evidence supported'}</small>
-    <p>{claim.source_game_ids.map((id) => <a key={id} href={`#game-${id}`}>Game {sources.findIndex((source) => source.id === id) + 1} </a>)}
-      {claim.statistic_ids.map((id) => <a key={id} href={`#stat-${id}`}>Statistic {id} </a>)}</p>
-  </article>) : <p>Insufficient evidence for claims in this section.</p>}</div>;
 }
 
 export default function App() {
@@ -101,8 +95,7 @@ export default function App() {
     setMovePending(true);
     setMoveError('');
     try {
-      const result = await requestJson('/api/v1/predict-move', {
-        method: 'POST', body: { fen: currentFen, initial_fen: initialFen, moves: snapshot.moves, opponent_username: opponent },
+      const result = await predictMove({ fen: currentFen, initial_fen: initialFen, moves: snapshot.moves, opponent_username: opponent }, {
         getAccessToken, signal: request.signal, timeout: 15000,
       });
       const current = store.getState().chess;

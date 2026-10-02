@@ -1,0 +1,1355 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Neuro Chess ML Engine",
+    "description": "Asgardeo-protected API for chess move recommendations, RAG strategy analysis, and PDF move extraction.",
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Unauthenticated liveness endpoint for container monitoring.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Readiness Check",
+        "operationId": "readiness_check_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/operations": {
+      "get": {
+        "summary": "Operational Status",
+        "description": "Restricted operational counters; no uploaded documents or bearer tokens.",
+        "operationId": "operational_status_api_v1_operations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/players": {
+      "get": {
+        "summary": "Available Players",
+        "operationId": "available_players_api_v1_players_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayersResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/predict-move": {
+      "post": {
+        "summary": "Predict Move",
+        "description": "Rank legal moves with a transparent heuristic and optional Redis cache.",
+        "operationId": "predict_move_api_v1_predict_move_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MovePredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovePredictionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ingest-async": {
+      "post": {
+        "summary": "Trigger Ingest",
+        "description": "Triggers an asynchronous PGN ingestion task via RabbitMQ.",
+        "operationId": "trigger_ingest_api_v1_ingest_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/predict-strategy": {
+      "post": {
+        "summary": "Predict Strategy",
+        "description": "Generates an in-depth strategic analysis using Gemini and PostgreSQL (pgvector).",
+        "operationId": "predict_strategy_api_v1_predict_strategy_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyPredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyPredictionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/predict-strategy/stream": {
+      "post": {
+        "summary": "Stream Strategy",
+        "operationId": "stream_strategy_api_v1_predict_strategy_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyPredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/extract-page-moves": {
+      "post": {
+        "summary": "Extract Page Moves",
+        "operationId": "extract_page_moves_api_v1_extract_page_moves_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_extract_page_moves_api_v1_extract_page_moves_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ocr-jobs/{job_id}": {
+      "get": {
+        "summary": "Ocr Status",
+        "operationId": "ocr_status_api_v1_ocr_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/extract-page-image": {
+      "post": {
+        "summary": "Extract Page Image",
+        "operationId": "extract_page_image_api_v1_extract_page_image_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_extract_page_image_api_v1_extract_page_image_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_extract_page_image_api_v1_extract_page_image_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "page"
+        ],
+        "title": "Body_extract_page_image_api_v1_extract_page_image_post"
+      },
+      "Body_extract_page_moves_api_v1_extract_page_moves_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "page"
+        ],
+        "title": "Body_extract_page_moves_api_v1_extract_page_moves_post"
+      },
+      "Claim": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 1800,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "tentative",
+              "supported"
+            ],
+            "title": "Confidence"
+          },
+          "source_game_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "title": "Source Game Ids"
+          },
+          "statistic_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "title": "Statistic Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text",
+          "confidence",
+          "source_game_ids",
+          "statistic_ids"
+        ],
+        "title": "Claim"
+      },
+      "EngineEvaluation": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable"
+            ],
+            "title": "Status",
+            "default": "unavailable"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": "Stockfish 18"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "default": false
+          },
+          "best": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EngineLine"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "alternatives": {
+            "items": {
+              "$ref": "#/components/schemas/EngineLine"
+            },
+            "type": "array",
+            "title": "Alternatives"
+          },
+          "predicted_move": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EngineLine"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "score_perspective": {
+            "type": "string",
+            "const": "white",
+            "title": "Score Perspective",
+            "default": "white"
+          },
+          "time_limit_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Limit Ms"
+          },
+          "node_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Limit"
+          }
+        },
+        "type": "object",
+        "title": "EngineEvaluation"
+      },
+      "EngineLine": {
+        "properties": {
+          "uci": {
+            "type": "string",
+            "title": "Uci"
+          },
+          "san": {
+            "type": "string",
+            "title": "San"
+          },
+          "score_white_cp": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score White Cp"
+          },
+          "mate_white": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mate White"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "uci",
+          "san"
+        ],
+        "title": "EngineLine"
+      },
+      "GameStatistic": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sample",
+              "result",
+              "opening",
+              "position"
+            ],
+            "title": "Type"
+          },
+          "games": {
+            "type": "integer",
+            "title": "Games"
+          },
+          "game_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Game Ids"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line"
+          },
+          "position_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "games",
+          "game_ids"
+        ],
+        "title": "GameStatistic"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IngestRequest": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename"
+        ],
+        "title": "IngestRequest"
+      },
+      "MoveCandidate": {
+        "properties": {
+          "san": {
+            "type": "string",
+            "title": "San"
+          },
+          "uci": {
+            "type": "string",
+            "title": "Uci"
+          },
+          "probability": {
+            "type": "number",
+            "title": "Probability"
+          },
+          "observed_games": {
+            "type": "integer",
+            "title": "Observed Games"
+          }
+        },
+        "type": "object",
+        "required": [
+          "san",
+          "uci",
+          "probability",
+          "observed_games"
+        ],
+        "title": "MoveCandidate"
+      },
+      "MovePredictionRequest": {
+        "properties": {
+          "fen": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 10,
+            "title": "Fen"
+          },
+          "opponent_username": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opponent Username",
+            "default": "Opponent"
+          },
+          "initial_fen": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 10
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Fen"
+          },
+          "moves": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 1500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moves"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fen"
+        ],
+        "title": "MovePredictionRequest"
+      },
+      "MovePredictionResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "opponent": {
+            "type": "string",
+            "title": "Opponent"
+          },
+          "fen": {
+            "type": "string",
+            "title": "Fen"
+          },
+          "top_predicted_move": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Predicted Move"
+          },
+          "san_move": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "San Move"
+          },
+          "suggested_move": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Move"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "confidence_type": {
+            "type": "string",
+            "title": "Confidence Type",
+            "default": "relative_heuristic"
+          },
+          "prediction_source": {
+            "type": "string",
+            "title": "Prediction Source",
+            "default": "position_heuristic"
+          },
+          "cached": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached",
+            "default": false
+          },
+          "matching_games": {
+            "type": "integer",
+            "title": "Matching Games",
+            "default": 0
+          },
+          "observed_games": {
+            "type": "integer",
+            "title": "Observed Games",
+            "default": 0
+          },
+          "history_weight": {
+            "type": "number",
+            "title": "History Weight",
+            "default": 0
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/MoveCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "engine": {
+            "$ref": "#/components/schemas/EngineEvaluation"
+          },
+          "game_over": {
+            "type": "boolean",
+            "title": "Game Over",
+            "default": false
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "draw_claim_available": {
+            "type": "boolean",
+            "title": "Draw Claim Available",
+            "default": false
+          },
+          "history_verified": {
+            "type": "boolean",
+            "title": "History Verified",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "opponent",
+          "fen",
+          "confidence"
+        ],
+        "title": "MovePredictionResponse"
+      },
+      "OcrJobResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OcrResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "cached": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status"
+        ],
+        "title": "OcrJobResponse"
+      },
+      "OcrResult": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "moves": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Moves"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "text_items": {
+            "items": {
+              "$ref": "#/components/schemas/OcrTextItem"
+            },
+            "type": "array",
+            "title": "Text Items"
+          },
+          "ocr_confidence": {
+            "type": "number",
+            "title": "Ocr Confidence"
+          },
+          "extraction_version": {
+            "type": "string",
+            "title": "Extraction Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "moves",
+          "text",
+          "text_items",
+          "ocr_confidence",
+          "extraction_version"
+        ],
+        "title": "OcrResult"
+      },
+      "OcrTextItem": {
+        "properties": {
+          "str": {
+            "type": "string",
+            "title": "Str"
+          },
+          "x": {
+            "type": "number",
+            "title": "X"
+          },
+          "y": {
+            "type": "number",
+            "title": "Y"
+          },
+          "width": {
+            "type": "number",
+            "title": "Width"
+          },
+          "height": {
+            "type": "number",
+            "title": "Height"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "str",
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "OcrTextItem"
+      },
+      "PlayerSummary": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "games": {
+            "type": "integer",
+            "title": "Games"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "games"
+        ],
+        "title": "PlayerSummary"
+      },
+      "PlayersResponse": {
+        "properties": {
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/PlayerSummary"
+            },
+            "type": "array",
+            "title": "Players"
+          }
+        },
+        "type": "object",
+        "required": [
+          "players"
+        ],
+        "title": "PlayersResponse"
+      },
+      "SourceGame": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "white": {
+            "type": "string",
+            "title": "White"
+          },
+          "black": {
+            "type": "string",
+            "title": "Black"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "result": {
+            "type": "string",
+            "title": "Result"
+          },
+          "eco": {
+            "type": "string",
+            "title": "Eco"
+          },
+          "timecontrol": {
+            "type": "string",
+            "title": "Timecontrol"
+          },
+          "pgn": {
+            "type": "string",
+            "title": "Pgn"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "white",
+          "black",
+          "event",
+          "date",
+          "result",
+          "eco",
+          "timecontrol",
+          "pgn"
+        ],
+        "title": "SourceGame"
+      },
+      "StrategyPredictionRequest": {
+        "properties": {
+          "opponent_name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Opponent Name"
+          },
+          "context": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Context",
+            "default": ""
+          },
+          "color": {
+            "type": "string",
+            "enum": [
+              "any",
+              "white",
+              "black"
+            ],
+            "title": "Color",
+            "default": "any"
+          }
+        },
+        "type": "object",
+        "required": [
+          "opponent_name"
+        ],
+        "title": "StrategyPredictionRequest"
+      },
+      "StrategyPredictionResponse": {
+        "properties": {
+          "opponent": {
+            "type": "string",
+            "title": "Opponent"
+          },
+          "report": {
+            "$ref": "#/components/schemas/StrategyReport"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceGame"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "statistics": {
+            "items": {
+              "$ref": "#/components/schemas/GameStatistic"
+            },
+            "type": "array",
+            "title": "Statistics"
+          },
+          "supporting_games": {
+            "type": "integer",
+            "title": "Supporting Games"
+          },
+          "available_games": {
+            "type": "integer",
+            "title": "Available Games"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "default": false
+          },
+          "data_version": {
+            "type": "string",
+            "title": "Data Version"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "prompt_version": {
+            "type": "string",
+            "title": "Prompt Version"
+          },
+          "context": {
+            "type": "string",
+            "title": "Context",
+            "default": ""
+          },
+          "color": {
+            "type": "string",
+            "title": "Color",
+            "default": "any"
+          }
+        },
+        "type": "object",
+        "required": [
+          "opponent",
+          "report",
+          "sources",
+          "statistics",
+          "supporting_games",
+          "available_games",
+          "data_version",
+          "model",
+          "prompt_version"
+        ],
+        "title": "StrategyPredictionResponse"
+      },
+      "StrategyReport": {
+        "properties": {
+          "profile": {
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Profile"
+          },
+          "tendencies": {
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Tendencies"
+          },
+          "weaknesses": {
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Weaknesses"
+          },
+          "recommendations": {
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Recommendations"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile",
+          "tendencies",
+          "weaknesses",
+          "recommendations",
+          "limitations"
+        ],
+        "title": "StrategyReport"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

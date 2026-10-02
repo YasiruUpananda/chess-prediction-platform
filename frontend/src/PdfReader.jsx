@@ -5,7 +5,8 @@ import { Chess } from 'chess.js';
 import { parseChessText, textBlocks, EXTRACTION_VERSION } from './chessPdf';
 import { restoreGame, gameSnapshot } from './gameHistory';
 import { useSession } from './sessionContext';
-import { requestJson, friendlyError, waitForPoll } from './api';
+import { friendlyError, waitForPoll } from './api';
+import { extractPageImage, getOcrJob } from './apiClient';
 const PdfDocumentView = lazy(() => import('./PdfDocumentView'));
 
 export default function PdfReader() {
@@ -101,7 +102,7 @@ export default function PdfReader() {
             canvas.width = 0; canvas.height = 0;
             if (!blob || blob.size > 8 * 1024 * 1024) throw new Error('Page image exceeds the 8 MB OCR upload limit.');
             const formData = new FormData(); formData.append('file', blob, 'page.png'); formData.append('page', String(pageNumber));
-            let job = await requestJson('/api/v1/extract-page-image', { method: 'POST', body: formData,
+            let job = await extractPageImage(formData, {
               signal: controller.signal, getAccessToken, timeout: 30000,
             });
             const deadline = Date.now() + 3 * 60 * 1000;
@@ -109,7 +110,7 @@ export default function PdfReader() {
               if (Date.now() > deadline) throw new Error('OCR is taking too long. Try this page again later.');
               setMoveStatus(job.status === 'queued' ? 'Page queued for OCR...' : 'Reading this page image...');
               await waitForPoll(controller.signal);
-              job = await requestJson(`/api/v1/ocr-jobs/${job.job_id}`, {
+              job = await getOcrJob(job.job_id, {
                 signal: controller.signal, timeout: 10000, getAccessToken,
               });
             }
