@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useAuthContext } from '@asgardeo/auth-react';
+import { useSession } from './sessionContext';
 
 export default function Home() {
-  const { state, signIn, signOut } = useAuthContext();
+  const { state, signIn, signOut, requestSession } = useSession();
   const isAuthenticated = state.isAuthenticated;
 
   return (
@@ -13,8 +13,8 @@ export default function Home() {
           <span><strong>Neuro Chess</strong><small>Opponent intelligence</small></span>
         </Link>
         <nav className="home-nav" aria-label="Main navigation">
-          <Link to="/predict">Prediction engine</Link>
-          <Link to="/reader">Book reader</Link>
+          <Link onClick={requestSession} to="/predict">Prediction engine</Link>
+          <Link onClick={requestSession} to="/reader">Book reader</Link>
           {isAuthenticated ? (
             <button className="home-auth-button" onClick={() => signOut()} type="button">Sign out</button>
           ) : (
@@ -29,8 +29,8 @@ export default function Home() {
           <h1>See the game<br /><em>from every angle.</em></h1>
           <p>Study your opponent’s patterns, explore chess books, and turn every position into a plan.</p>
           <div className="home-actions">
-            <Link className="home-primary-link" to="/predict">Open prediction engine <span aria-hidden="true">→</span></Link>
-            <Link className="home-secondary-link" to="/reader">Read a chess book</Link>
+            <Link onClick={requestSession} className="home-primary-link" to="/predict">Open prediction engine <span aria-hidden="true">→</span></Link>
+            <Link onClick={requestSession} className="home-secondary-link" to="/reader">Read a chess book</Link>
           </div>
           <div className="home-auth-note" aria-live="polite">
             {isAuthenticated ? `Signed in${state.username ? ` as ${state.username}` : ''} with Asgardeo.` : 'Sign in with Asgardeo to unlock personalized opponent analysis.'}
@@ -48,9 +48,9 @@ export default function Home() {
       </section>
 
       <section className="home-features" aria-label="Neuro Chess features">
-        <article><span>01</span><div><h2>Predict</h2><p>Explore likely responses to a position and prepare your next plan.</p></div><Link to="/predict" aria-label="Open prediction engine">↗</Link></article>
-        <article><span>02</span><div><h2>Study</h2><p>Read chess books alongside an interactive board and move finder.</p></div><Link to="/reader" aria-label="Open chess book reader">↗</Link></article>
-        <article><span>03</span><div><h2>Prepare</h2><p>Build a focused opponent report from game history and context.</p></div><Link to="/predict" aria-label="Prepare an opponent report">↗</Link></article>
+        <article><span>01</span><div><h2>Predict</h2><p>Explore likely responses to a position and prepare your next plan.</p></div><Link onClick={requestSession} to="/predict" aria-label="Open prediction engine">↗</Link></article>
+        <article><span>02</span><div><h2>Study</h2><p>Read chess books alongside an interactive board and move finder.</p></div><Link onClick={requestSession} to="/reader" aria-label="Open chess book reader">↗</Link></article>
+        <article><span>03</span><div><h2>Prepare</h2><p>Build a focused opponent report from game history and context.</p></div><Link onClick={requestSession} to="/predict" aria-label="Prepare an opponent report">↗</Link></article>
       </section>
     </main>
   );

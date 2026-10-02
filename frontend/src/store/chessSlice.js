@@ -19,6 +19,7 @@ export const chessSlice = createSlice({
   name: 'chess',
   initialState,
   reducers: {
+    resetWorkspace: () => initialState,
     setFen: (state, action) => {
       state.fen = action.payload;
       state.initialFen = action.payload;
@@ -62,6 +63,13 @@ export const chessSlice = createSlice({
     setPredictedMove: (state, action) => {
       state.predictedMove = action.payload;
     },
+    clearStrategy: (state) => {
+      state.strategyAnalysis = '';
+      state.supportingGames = 0;
+      state.availableGames = 0;
+      state.loading = false;
+      state.error = null;
+    },
     applyMovePrediction: (state, action) => {
       const { expectedFen, expectedRevision, opponent, response, nextFen, nextMoves, nextPgn } = action.payload;
       if (state.fen !== expectedFen || state.opponentName !== opponent || state.revision !== expectedRevision) return;
@@ -79,10 +87,12 @@ export const chessSlice = createSlice({
 });
 
 export const {
+  resetWorkspace,
   setFen,
   setGameSnapshot,
   setOpponentName,
   setLoading,
+  clearStrategy,
   setStrategyAnalysis,
   setPredictedMove,
   applyMovePrediction,

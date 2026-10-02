@@ -1,13 +1,16 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Outlet } from 'react-router-dom';
-import { useAuthContext } from '@asgardeo/auth-react';
+import { useSession } from './sessionContext';
+import AuthBoundary from './AuthBoundary';
+import AuthenticationRecovery from './AuthenticationRecovery';
 
 const Home = lazy(() => import('./Home'));
 const Dashboard = lazy(() => import('./Dashboard'));
 const PdfReader = lazy(() => import('./PdfReader'));
+const WorkspaceProvider = lazy(() => import('./WorkspaceProvider'));
 
 function ProtectedArea() {
-  const { state, signIn } = useAuthContext();
+  const { state, signIn } = useSession();
   if (state.isLoading) return <main className="app-shell" aria-live="polite">Checking your Asgardeo session…</main>;
   if (!state.isAuthenticated) {
     return (
@@ -22,12 +25,15 @@ function ProtectedArea() {
       </main>
     );
   }
-  return <Outlet />;
+  const owner = state.sub || state.username || 'session';
+  return <WorkspaceProvider key={owner} owner={owner}><Outlet /></WorkspaceProvider>;
 }
 
 export default function App() {
   return (
     <Router>
+      <AuthBoundary>
+      <AuthenticationRecovery />
       <Suspense fallback={<main className="app-shell" aria-live="polite">Opening Neuro Chess…</main>}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -37,6 +43,7 @@ export default function App() {
           </Route>
         </Routes>
       </Suspense>
+      </AuthBoundary>
     </Router>
   );
 }
