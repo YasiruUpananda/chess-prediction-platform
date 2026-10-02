@@ -94,7 +94,7 @@ export default function App() {
   const { state, signIn, signOut, getAccessToken } = useAuthContext();
 
   // --- Read Global State from Redux ---
-  const { fen, opponentName, strategyAnalysis, predictedMove, loading, error } = useSelector(
+  const { fen, opponentName, strategyAnalysis, predictedMove, loading, error, supportingGames, availableGames } = useSelector(
     (state) => state.chess
   );
 
@@ -171,7 +171,7 @@ export default function App() {
         opponent_name: opponentName || "Magnus Carlsen",
         context: context
       }, { headers: await getBearerHeaders(getAccessToken) });
-      dispatch(setStrategyAnalysis(response.data.strategy_analysis));
+      dispatch(setStrategyAnalysis(response.data));
     } catch (error) {
       console.error("Prediction Error:", error);
       dispatch(setError(error.response?.data?.detail || "Failed to generate prediction."));
@@ -298,6 +298,7 @@ export default function App() {
                   )}
                   {strategyAnalysis && (
                     <div className="strategy-result strategy-report">
+                      <p>Based on {supportingGames} supporting games from {availableGames} indexed games for this opponent.</p>
                       <div className="report-topline">
                         <span className="result-label">Strategic analysis</span>
                         <span className="report-count">{strategyTabs.length} sections</span>

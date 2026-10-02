@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 # Automatically find and load .env from the current or parent directory
 load_dotenv(find_dotenv())
 
-from predict_opponent import generate_chess_prediction
+from predict_opponent import generate_chess_prediction, InsufficientGameData, StrategyNotConfigured
 from token_auth import require_asgardeo_user
 from database import init_db
 from task_queue import enqueue
@@ -95,6 +95,8 @@ class StrategyPredictionRequest(BaseModel):
 class StrategyPredictionResponse(BaseModel):
     opponent: str
     strategy_analysis: str
+    supporting_games: int
+    available_games: int
 
 
 # --- Regular Expressions ---
@@ -301,18 +303,12 @@ def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(requi
 def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
     """Generates an in-depth strategic analysis using Gemini and PostgreSQL (pgvector)."""
     try:
-        if not os.getenv("GOOGLE_API_KEY"):
-            raise HTTPException(status_code=503, detail="Strategy analysis is not configured. Set GOOGLE_API_KEY.")
-        # Construct the context query
-        query = f"{request.opponent_name}. {request.context}".strip()
-
-        # Run the RAG pipeline
-        analysis_result = generate_chess_prediction(query)
-
-        return StrategyPredictionResponse(
-            opponent=request.opponent_name,
-            strategy_analysis=analysis_result,
-        )
+        analysis_result = generate_chess_prediction(request.opponent_name, request.context)
+        return StrategyPredictionResponse(opponent=request.opponent_name, **analysis_result)
+    except InsufficientGameData as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except StrategyNotConfigured as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     except Exception as e:
         if isinstance(e, HTTPException):
             raise

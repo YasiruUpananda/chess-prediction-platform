@@ -4,6 +4,8 @@ const initialState = {
   fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
   opponentName: 'Magnus Carlsen',
   strategyAnalysis: '',
+  supportingGames: 0,
+  availableGames: 0,
   predictedMove: null,
   loading: false,
   error: null,
@@ -23,7 +25,9 @@ export const chessSlice = createSlice({
       state.loading = action.payload;
     },
     setStrategyAnalysis: (state, action) => {
-      state.strategyAnalysis = action.payload;
+      state.strategyAnalysis = action.payload.strategy_analysis;
+      state.supportingGames = action.payload.supporting_games;
+      state.availableGames = action.payload.available_games;
       state.loading = false;
       state.error = null;
     },
