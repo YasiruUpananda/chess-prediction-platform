@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-02",
+  "environment": "Local Docker Compose; 20 warmed SQL iterations; one representative player filter; embedding and model generation excluded",
+  "indexed_games": 188,
+  "moves": 14229,
+  "vectors": 188,
+  "fresh_connection": { "median_ms": 7.416, "max_ms": 7.891 },
+  "pooled_connection": { "median_ms": 0.555, "max_ms": 1.151 },
+  "filtered_vector_search": { "median_ms": 0.769, "max_ms": 2.747 },
+  "vector_plan": { "execution_ms": 0.108, "planning_ms": 0.037, "nodes": ["Limit", "Sort", "Seq Scan"] },
+  "position_indexes": ["player_moves_pkey", "idx_player_fen", "idx_player_position", "idx_game_ply", "idx_player_canonical_position"],
+  "vector_index_decision": "Keep exact search at current volume; compare filtered latency and recall at larger scale before HNSW",
+  "image_bytes": { "api": 2064923586, "ingestion": 1818844989, "ocr": 572276008 },
+  "verification": { "backend_tests": 39, "frontend_unit_tests": 13, "npm_audit_total": 0, "npm_audit_production": 0, "backup_restored_indexed_games": 188 }
+}
