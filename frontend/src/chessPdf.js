@@ -1,11 +1,11 @@
 ﻿import { Chess } from 'chess.js';
-export const EXTRACTION_VERSION = 'layout-rav-v3';
+export const EXTRACTION_VERSION = 'layout-rav-v4';
 const SAN = /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)$/;
 const UNKNOWN_GLYPH = /[\uFFFD\uE000-\uF8FF¤]/;
 const unreadableMove = (token) => UNKNOWN_GLYPH.test(token) || (!SAN.test(token) && /^[^\s]+[a-h][1-8][+#]?$/.test(token));
 
 export function normalizeChessText(text) {
-  return text.replace(/[♔♚]/g, 'K').replace(/[♕♛]/g, 'Q').replace(/[♖♜]/g, 'R')
+  return text.replace(/[\uFE0E\uFE0F]/g, '').replace(/[♔♚]/g, 'K').replace(/[♕♛]/g, 'Q').replace(/[♖♜]/g, 'R')
     .replace(/[♗♝]/g, 'B').replace(/[♘♞]/g, 'N').replace(/[♙♟]/g, '')
     .replace(/[0O]-[0O](-[0O])?/g, (castle) => castle.replace(/0/g, 'O'))
     .replace(/(\d+)\s*\.\s*\.\s*\./g, '$1...')
@@ -50,8 +50,10 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
   let pendingNumber = null;
   let active = allowUnnumbered;
   let unmatchedClosing = false;
-  const newLine = (prefix = [], variation = false) => {
-    const line = { steps: [...prefix], variation };
+  const newLine = (prefix = [], variation = false, parent = null) => {
+    const id = lines.length;
+    const line = { id, rootId: parent?.rootId ?? id, steps: [...prefix], variation,
+      parentSteps:parent?[...parent.steps]:null, hasOwnMoves:false };
     lines.push(line);
     return line;
   };
@@ -59,7 +61,7 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
     if (token.startsWith('{') || token.startsWith(';') || token.startsWith('$')) continue;
     if (token === '(') {
       stack.push({ current, active, pendingNumber });
-      current = newLine(current?.steps.slice(0, -1) || [], true);
+      current = newLine(current?.steps.slice(0, -1) || [], true, current);
       active = true; pendingNumber = null;
       continue;
     }
@@ -72,6 +74,16 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
     const number = /^(\d+)\.(\.\.)?$/.exec(token);
     if (number) {
       const next = { number: Number(number[1]), turn: number[2] ? 'b' : 'w' };
+      // Books also place a numbered variation before the main reply. Its
+      // move number/side identifies the anchor, rather than always undoing a ply.
+      if(current?.parentSteps && !current.hasOwnMoves) {
+        const board=new Chess(initialFen), prefix=[];
+        for(const step of current.parentSteps) {
+          if(board.moveNumber()===next.number && board.turn()===next.turn) break;
+          try { board.move(step.san); prefix.push(step); } catch { break; }
+        }
+        if(board.moveNumber()===next.number && board.turn()===next.turn) current.steps=prefix;
+      }
       const previous = current?.steps.findLast((step) => step.number);
       if (!current || !active || (!stack.length && previous && next.number <= (previous.number || 0) && next.turn === 'w')) current = newLine();
       pendingNumber = next; active = true;
@@ -81,12 +93,13 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
     if ((SAN.test(token) || unreadableMove(token)) && active) {
       if (!current) current = newLine();
       current.steps.push({ san: token, ...pendingNumber });
+      current.hasOwnMoves=true;
       pendingNumber = null;
     } else if (token !== 'e.p.') {
       active = false;
     }
   }
-  return lines.filter((line) => line.steps.length).map((line, index) => {
+  return lines.filter((line) => line.steps.length).map((line) => {
     const game = new Chess(initialFen);
     const moves = [];
     let issue = stack.length || unmatchedClosing ? 'Unbalanced variation parentheses. Review and correct the notation.' : '';
@@ -102,7 +115,7 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
       try { moves.push(game.move(step.san).san); }
       catch { issue = `Cannot play ${step.san} after ${moves.length} moves. Correct the line or starting FEN.`; break; }
     }
-    return { id: index, variation: line.variation, raw: line.steps.map((step) => step.san).join(' '),
+    return { id: line.id, rootId: line.rootId, variation: line.variation, raw: line.steps.map((step) => step.san).join(' '),
       moves, candidates: line.steps.length, issue, confidence: issue ? 'low' : line.steps.length >= 4 ? 'high' : 'medium' };
   });
 }
