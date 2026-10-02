@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import io
 import os
 import time
@@ -6,7 +7,7 @@ import unittest
 from uuid import uuid4
 from unittest.mock import patch
 
-import fitz
+import pymupdf as fitz
 import httpx
 from PIL import Image
 import main
@@ -43,6 +44,8 @@ class PageImageTests(unittest.TestCase):
         main.app.dependency_overrides.clear()
         with connect() as db:
             db.execute('DELETE FROM ocr_jobs WHERE owner=ANY(%s)',([self.owner,self.other],))
+            db.execute('DELETE FROM request_limits WHERE owner=ANY(%s)',
+                       ([hashlib.sha256(owner.encode()).hexdigest() for owner in (self.owner,self.other)],))
 
     def image(self):
         with fitz.open() as doc:

@@ -30,6 +30,9 @@ def _cached_vector_store():
         collection_name=COLLECTION_NAME,
         connection=connection_string,
         use_jsonb=True,
+        engine_args={"pool_size": int(os.getenv("VECTOR_DB_POOL_MAX", "4")),
+                     "max_overflow": 0, "pool_timeout": 2, "pool_pre_ping": True,
+                     "connect_args": {"connect_timeout": 3, "options": "-c statement_timeout=15000"}},
     )
     return vector_store
 

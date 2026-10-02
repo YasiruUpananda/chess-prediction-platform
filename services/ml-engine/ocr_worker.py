@@ -10,6 +10,7 @@ from pathlib import Path
 
 import ocr_jobs
 from database import init_db
+from backend_health import heartbeat
 
 HEALTH_FILE = Path("/tmp/ocr-heartbeat")
 logging.basicConfig(level=logging.INFO)
@@ -28,7 +29,7 @@ def run_extract(page, content):
                 while process.poll() is None:
                     if time.monotonic() >= deadline:
                         raise TimeoutError("OCR exceeded the processing time limit")
-                    HEALTH_FILE.touch()
+                    heartbeat('ocr', HEALTH_FILE)
                     time.sleep(0.25)
                 if process.returncode:
                     raise ValueError("Unable to read this page; check the uploaded PDF or page image")
@@ -47,7 +48,7 @@ def main():
             init_db()
             while True:
                 job = ocr_jobs.claim()
-                HEALTH_FILE.touch()
+                heartbeat('ocr', HEALTH_FILE)
                 delay = 1
                 if job is None:
                     time.sleep(1)

@@ -10,6 +10,7 @@ from pathlib import Path
 import chess.pgn
 
 from database import connect, init_db
+from backend_health import heartbeat
 from chess_positions import position_key
 from task_queue import QUEUE, RETRY_QUEUE, connection, finish, setup
 
@@ -103,7 +104,7 @@ def main():
                     logger.info("Ingestion worker connected")
                     delay = 1
                     while conn.is_open:
-                        HEALTH_FILE.touch()
+                        heartbeat('ingestion', HEALTH_FILE)
                         method, properties, body = channel.basic_get(QUEUE, auto_ack=False)
                         if method is None:
                             method, properties, body = channel.basic_get(RETRY_QUEUE, auto_ack=False)
@@ -117,7 +118,7 @@ def main():
                             future = pool.submit(process_pgn, decode_task(body))
                             while not future.done():
                                 conn.process_data_events(time_limit=1)
-                                HEALTH_FILE.touch()
+                                heartbeat('ingestion', HEALTH_FILE)
                             future.result()
                         except Exception as exc:
                             logger.exception("Ingestion job failed")

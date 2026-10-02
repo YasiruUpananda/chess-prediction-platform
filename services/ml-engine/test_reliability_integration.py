@@ -3,6 +3,7 @@
 RUN_INTEGRATION_TESTS=1 python -m unittest test_reliability_integration -v
 """
 import os
+import hashlib
 import asyncio
 import io
 import tempfile
@@ -12,7 +13,7 @@ from unittest.mock import Mock, patch
 from pathlib import Path
 from uuid import uuid4
 
-import fitz
+import pymupdf as fitz
 import chess.pgn
 import httpx
 
@@ -31,6 +32,8 @@ class IntegrationTests(unittest.TestCase):
     def tearDown(self):
         with connect() as db:
             db.execute("DELETE FROM ocr_jobs WHERE owner=%s", (self.owner,))
+            db.execute('DELETE FROM request_limits WHERE owner=ANY(%s)',
+                       ([hashlib.sha256(owner.encode()).hexdigest() for owner in (self.owner,self.owner+'-other')],))
 
     def pdf(self, scanned=False):
         with fitz.open() as doc:
@@ -75,7 +78,7 @@ class IntegrationTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 202, response.text)
                     url = '/api/v1/ocr-jobs/' + response.json()['job_id']
                     self.assertEqual((await client.get(url)).status_code, 200)
-                    main.app.dependency_overrides[main.require_asgardeo_user] = lambda: {'sub': 'other-user'}
+                    main.app.dependency_overrides[main.require_asgardeo_user] = lambda: {'sub': self.owner+'-other'}
                     self.assertEqual((await client.get(url)).status_code, 404)
                     response = await client.post('/api/v1/predict-strategy', json={'opponent_name': self.owner})
                     self.assertEqual(response.status_code, 422)

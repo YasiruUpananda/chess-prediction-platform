@@ -1,12 +1,44 @@
 """Shared additive schema migrations and bounded database connections."""
 import os
-import psycopg
+import atexit
+import threading
+from psycopg_pool import ConnectionPool
+
+_pool = None
+_pool_lock = threading.Lock()
+
+
+def get_pool():
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            url = os.getenv("WORKER_DATABASE_URL") or os.environ["DATABASE_URL"]
+            _pool = ConnectionPool(url.replace("postgresql+psycopg://", "postgresql://", 1),
+                min_size=1, max_size=int(os.getenv("DB_POOL_MAX", "8")),
+                timeout=float(os.getenv("DB_POOL_TIMEOUT", "2")), max_waiting=32,
+                kwargs={"connect_timeout": 3, "options": "-c statement_timeout=15000"},
+                check=ConnectionPool.check_connection, open=True)
+    return _pool
 
 
 def connect():
-    url = os.getenv("WORKER_DATABASE_URL") or os.environ["DATABASE_URL"]
-    return psycopg.connect(url.replace("postgresql+psycopg://", "postgresql://", 1),
-                           connect_timeout=5, options="-c statement_timeout=15000")
+    return get_pool().connection()
+
+
+def close_pool():
+    global _pool
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+            _pool = None
+
+
+atexit.register(close_pool)
+
+
+def data_version():
+    with connect() as db:
+        return db.execute("SELECT version FROM dataset_version WHERE id=1").fetchone()[0]
 
 
 def init_db():
@@ -42,6 +74,26 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_ocr_status ON ocr_jobs(status, created_at);
             ALTER TABLE ocr_jobs ADD COLUMN IF NOT EXISTS cache_key TEXT;
             CREATE INDEX IF NOT EXISTS idx_ocr_owner_cache ON ocr_jobs(owner,cache_key);
+            CREATE TABLE IF NOT EXISTS dataset_version (
+                id INTEGER PRIMARY KEY CHECK (id=1), version BIGINT NOT NULL DEFAULT 0
+            );
+            INSERT INTO dataset_version(id) VALUES (1) ON CONFLICT DO NOTHING;
+            CREATE OR REPLACE FUNCTION bump_dataset_version() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                UPDATE dataset_version SET version=version+1 WHERE id=1;
+                RETURN NULL;
+            END $$;
+            DROP TRIGGER IF EXISTS ingested_games_version ON ingested_games;
+            CREATE TRIGGER ingested_games_version AFTER INSERT OR UPDATE OR DELETE
+                ON ingested_games FOR EACH ROW EXECUTE FUNCTION bump_dataset_version();
+            CREATE TABLE IF NOT EXISTS service_heartbeats (
+                name TEXT PRIMARY KEY, seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            CREATE TABLE IF NOT EXISTS request_limits (
+                owner TEXT NOT NULL, operation TEXT NOT NULL, window_id BIGINT NOT NULL,
+                count INTEGER NOT NULL, PRIMARY KEY(owner,operation)
+            );
+            CREATE INDEX IF NOT EXISTS idx_request_limit_window ON request_limits(window_id);
         """)
         # Older rows were written with legal FENs; normalize legal EP state too.
         import chess

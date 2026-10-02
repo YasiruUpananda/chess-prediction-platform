@@ -5,6 +5,7 @@ import os
 from uuid import UUID
 from pathlib import Path
 from typing import Any, Optional, Literal
+from contextlib import asynccontextmanager
 
 import chess
 import redis.asyncio as aioredis
@@ -19,22 +20,35 @@ load_dotenv(find_dotenv())
 
 from predict_opponent import (generate_chess_prediction, strategy_events, StrategyReport,
                               InsufficientGameData, StrategyNotConfigured, StrategyBusy, StrategyProviderUnavailable)
-from database import init_db, connect
+from database import init_db, connect, close_pool, data_version, get_pool
 from chess_positions import position_key, validated_board
 from prediction_model import score_legal_moves, combine_history_and_heuristic, PRIOR_STRENGTH
 from engine_pool import pool as engine_pool
 from task_queue import enqueue
 import ocr_jobs
 from token_auth import require_asgardeo_user
+from operations import report_user, ocr_user, move_user, ingestion_user, require_ingestion_permission
+from backend_health import readiness
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("neuro_chess.api")
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 # --- FastAPI Initialization ---
+@asynccontextmanager
+async def lifespan(instance):
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_event()
+
+
 app = FastAPI(
     title="Neuro Chess ML Engine",
     description="Asgardeo-protected API for chess move recommendations, RAG strategy analysis, and PDF move extraction.",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 # --- CORS Middleware ---
@@ -51,7 +65,6 @@ app.add_middleware(
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis_client = None
 
-@app.on_event("startup")
 async def startup_event():
     global redis_client
     await asyncio.to_thread(init_db)
@@ -63,13 +76,13 @@ async def startup_event():
     except Exception as e:
         logger.warning("Redis unavailable; continuing without cache: %s", e)
 
-@app.on_event("shutdown")
 async def shutdown_event():
     if hasattr(app.state, "embedding_warmup"):
         app.state.embedding_warmup.cancel()
     await asyncio.to_thread(engine_pool.close)
     if redis_client:
         await redis_client.aclose()
+    await asyncio.to_thread(close_pool)
 
 # --- Pydantic Request & Response Schemas ---
 class MovePredictionRequest(BaseModel):
@@ -157,6 +170,35 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/ready")
+def readiness_check():
+    ready, dependencies = readiness()
+    return JSONResponse({'status': 'ready' if ready else 'not_ready', 'dependencies': dependencies},
+                        status_code=200 if ready else 503)
+
+
+@app.get("/api/v1/operations")
+def operational_status(_user: dict[str, Any] = Depends(require_ingestion_permission)):
+    """Restricted operational counters; no uploaded documents or bearer tokens."""
+    ready, dependencies = readiness()
+    with connect() as db:
+        jobs = dict(db.execute("SELECT status,count(*) FROM ocr_jobs GROUP BY status").fetchall())
+        unindexed = db.execute("SELECT count(*) FROM ingested_games WHERE NOT indexed").fetchone()[0]
+        ages = dict(db.execute("SELECT name,extract(epoch FROM now()-seen_at)::int FROM service_heartbeats").fetchall())
+    from task_queue import connection, QUEUE, RETRY_QUEUE, DEAD_QUEUE
+    queue_counts = {}
+    try:
+        with connection() as conn:
+            channel = conn.channel()
+            for name in (QUEUE, RETRY_QUEUE, DEAD_QUEUE):
+                queue_counts[name] = channel.queue_declare(queue=name, passive=True).method.message_count
+    except Exception:
+        queue_counts = {"status": "unavailable"}
+    return {'ready': ready, 'dependencies': dependencies, 'worker_age_seconds': ages,
+            'pool': get_pool().get_stats(), 'ocr_jobs': jobs, 'unindexed_games': unindexed,
+            'ingestion_queues': queue_counts}
+
+
 @app.get("/api/v1/players")
 def available_players(_user: dict[str, Any] = Depends(require_asgardeo_user)):
     with connect() as db:
@@ -168,7 +210,7 @@ def available_players(_user: dict[str, Any] = Depends(require_asgardeo_user)):
 
 
 @app.post("/api/v1/predict-move", response_model=MovePredictionResponse)
-async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
+async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = Depends(move_user)):
     """Rank legal moves with a transparent heuristic and optional Redis cache."""
     try:
         try:
@@ -186,8 +228,13 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
         import hashlib
         history_signature = hashlib.sha256(json.dumps([board.root().fen(), [m.uci() for m in board.move_stack],
                                                        board.fen()]).encode()).hexdigest()
-        cache_key = f"move:v3:{opponent.strip().casefold()}:{history_signature}:{request.moves is not None}"
-        if redis_client:
+        try:
+            version = await asyncio.to_thread(data_version)
+        except Exception:
+            version = None
+            logger.warning("Dataset version unavailable; bypassing move cache")
+        cache_key = f"move:v4:{version}:{opponent.strip().casefold()}:{history_signature}:{request.moves is not None}"
+        if redis_client and version is not None:
             try:
                 cached_data = await asyncio.wait_for(redis_client.get(cache_key), timeout=0.3)
                 if cached_data:
@@ -197,12 +244,13 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
             except Exception as error:
                 logger.warning("Cache read skipped (%s)", type(error).__name__)
 
-        scored_moves = score_legal_moves(board)
+        scored_moves = await asyncio.to_thread(score_legal_moves, board)
         try:
             historical_counts = await asyncio.to_thread(find_historical_move_counts, opponent, board.fen())
         except Exception as error:
             logger.warning("Could not load opponent move history; using position heuristic: %s", error)
             historical_counts = {}
+            version = None
         preferences = combine_history_and_heuristic(scored_moves, historical_counts)
         if not preferences:
             raise HTTPException(status_code=400, detail="No legal moves available.")
@@ -237,7 +285,7 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
         }
 
         # Brief TTL lets newly ingested history become visible quickly.
-        if redis_client and engine.get("status") == "available":
+        if redis_client and version is not None and engine.get("status") == "available":
             try:
                 await asyncio.wait_for(redis_client.setex(cache_key, 60, json.dumps(response_data)), timeout=0.3)
             except Exception as error:
@@ -253,7 +301,7 @@ class IngestRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
 
 @app.post("/api/v1/ingest-async", status_code=202)
-def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
+def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(ingestion_user)):
     """Triggers an asynchronous PGN ingestion task via RabbitMQ."""
     data_dir = Path(os.getenv("PGN_DATA_DIR", "/app/data")).resolve()
     candidate = (data_dir / request.filename).resolve()
@@ -270,7 +318,7 @@ def trigger_ingest(request: IngestRequest, _user: dict[str, Any] = Depends(requi
     return {"status": "Accepted", "message": f"Dataset {request.filename} queued for background processing."}
 
 @app.post("/api/v1/predict-strategy", response_model=StrategyPredictionResponse)
-async def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
+async def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, Any] = Depends(report_user)):
     """Generates an in-depth strategic analysis using Gemini and PostgreSQL (pgvector)."""
     try:
         analysis_result = await asyncio.wait_for(asyncio.to_thread(
@@ -295,7 +343,7 @@ async def predict_strategy(request: StrategyPredictionRequest, _user: dict[str, 
 
 @app.post("/api/v1/predict-strategy/stream")
 async def stream_strategy(request: StrategyPredictionRequest,
-                          _user: dict[str, Any] = Depends(require_asgardeo_user)):
+                          _user: dict[str, Any] = Depends(report_user)):
     async def events():
         try:
             async for event in strategy_events(request.opponent_name, request.context, request.color):
@@ -315,7 +363,7 @@ async def stream_strategy(request: StrategyPredictionRequest,
 @app.post("/api/v1/extract-page-moves", status_code=202)
 async def extract_page_moves(
     file: UploadFile = File(...), page: int = Form(...),
-    _user: dict[str, Any] = Depends(require_asgardeo_user),
+    _user: dict[str, Any] = Depends(ocr_user),
 ):
     try:
         if page < 1:
@@ -350,7 +398,7 @@ def ocr_status(job_id: UUID, _user: dict[str, Any] = Depends(require_asgardeo_us
 
 @app.post("/api/v1/extract-page-image", status_code=202)
 async def extract_page_image(file: UploadFile = File(...), page: int = Form(...),
-                             _user: dict[str, Any] = Depends(require_asgardeo_user)):
+                             _user: dict[str, Any] = Depends(ocr_user)):
     try:
         if page<1:
             raise HTTPException(status_code=400,detail="Page number must be at least 1.")
