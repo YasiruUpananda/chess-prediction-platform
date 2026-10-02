@@ -1,40 +1,42 @@
-import os
+import asyncio
 import json
+import logging
+import math
+import os
+from pathlib import Path
 from typing import Any, Optional
+
+import chess
+import pika
+import redis.asyncio as aioredis
+import psycopg
 from dotenv import find_dotenv, load_dotenv
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, Field
 
 # Automatically find and load .env from the current or parent directory
 load_dotenv(find_dotenv())
 
-import pika
-import chess
-import torch
-import redis.asyncio as aioredis
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
-
-# Internal engine imports
-from model import ChessOpponentPredictor
 from predict_opponent import generate_chess_prediction
 from token_auth import require_asgardeo_user
+
+logger = logging.getLogger("neuro_chess.api")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 
 # --- FastAPI Initialization ---
 app = FastAPI(
     title="Neuro Chess ML Engine",
-    description="Unified API with Redis caching, PyTorch neural networks, and RAG strategy analysis",
-    version="1.0.0",
+    description="Asgardeo-protected API for chess move recommendations and RAG strategy analysis.",
+    version="2.0.0",
 )
 
 # --- CORS Middleware ---
 # Allows your React frontend to interact with this API without browser blocks
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
+    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,35 +52,19 @@ async def startup_event():
     try:
         redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
         await redis_client.ping()
-        print("Successfully connected to Redis!")
+        logger.info("Connected to Redis")
     except Exception as e:
-        print(f"Redis connection warning: {e}")
+        logger.warning("Redis unavailable; continuing without cache: %s", e)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     if redis_client:
         await redis_client.close()
 
-# --- PyTorch Model Setup ---
-model = ChessOpponentPredictor()
-model.eval()
-
-# --- Helper Function for FEN to Tensor ---
-def fen_to_tensor(board: chess.Board):
-    """Converts a chess board into a 64-element PyTorch tensor."""
-    piece_values = {
-        "P": 1, "N": 3, "B": 3, "R": 5, "Q": 9, "K": 10,
-        "p": -1, "n": -3, "b": -3, "r": -5, "q": -9, "k": -10
-    }
-    tensor = torch.zeros(64)
-    for square, piece in board.piece_map().items():
-        tensor[square] = piece_values.get(piece.symbol(), 0)
-    return tensor.unsqueeze(0) # Reshape to (1, 64) for the neural network
-
 # --- Pydantic Request & Response Schemas ---
 class MovePredictionRequest(BaseModel):
-    fen: str
-    opponent_username: Optional[str] = "Opponent"
+    fen: str = Field(min_length=10, max_length=120)
+    opponent_username: Optional[str] = Field(default="Opponent", max_length=120)
 
 
 class MovePredictionResponse(BaseModel):
@@ -89,17 +75,116 @@ class MovePredictionResponse(BaseModel):
     san_move: str
     suggested_move: str
     confidence: float
+    confidence_type: str = "relative_heuristic"
+    prediction_source: str = "position_heuristic"
     cached: Optional[bool] = False
 
 
 class StrategyPredictionRequest(BaseModel):
-    opponent_name: str
-    context: str = ""
+    opponent_name: str = Field(min_length=1, max_length=120)
+    context: str = Field(default="", max_length=2000)
 
 
 class StrategyPredictionResponse(BaseModel):
     opponent: str
     strategy_analysis: str
+
+
+PIECE_VALUES = {
+    chess.PAWN: 1.0,
+    chess.KNIGHT: 3.0,
+    chess.BISHOP: 3.2,
+    chess.ROOK: 5.0,
+    chess.QUEEN: 9.0,
+    chess.KING: 0.0,
+}
+CENTER_SQUARES = (chess.D4, chess.E4, chess.D5, chess.E5)
+
+
+def score_legal_moves(board: chess.Board) -> list[tuple[chess.Move, float]]:
+    """Rank legal moves with a small, transparent one-ply positional heuristic."""
+    mover = board.turn
+    ranked = []
+    for move in board.legal_moves:
+        moved_piece = board.piece_at(move.from_square)
+        if moved_piece is None:
+            continue
+
+        captured_piece = board.piece_at(move.to_square)
+        if board.is_en_passant(move):
+            captured_piece = chess.Piece(chess.PAWN, not mover)
+        score = PIECE_VALUES[captured_piece.piece_type] * 0.8 if captured_piece else 0.0
+
+        if move.promotion:
+            score += PIECE_VALUES[move.promotion] - PIECE_VALUES[chess.PAWN]
+
+        before_distance = min(chess.square_distance(move.from_square, center) for center in CENTER_SQUARES)
+        after_distance = min(chess.square_distance(move.to_square, center) for center in CENTER_SQUARES)
+        score += (before_distance - after_distance) * 0.035
+
+        next_board = board.copy(stack=False)
+        next_board.push(move)
+        if next_board.is_check():
+            score += 0.25
+        if board.is_castling(move):
+            score += 0.2
+
+        destination_piece = next_board.piece_at(move.to_square)
+        if destination_piece and next_board.is_attacked_by(not mover, move.to_square):
+            attackers = len(next_board.attackers(not mover, move.to_square))
+            defenders = len(next_board.attackers(mover, move.to_square))
+            if attackers > defenders:
+                score -= PIECE_VALUES[destination_piece.piece_type] * 0.55
+
+        ranked.append((move, score))
+    return ranked
+
+
+def relative_move_preferences(scored_moves: list[tuple[chess.Move, float]]) -> list[tuple[chess.Move, float]]:
+    """Normalize heuristic rankings; values are not empirical win probabilities."""
+    if not scored_moves:
+        return []
+    temperature = 0.7
+    max_score = max(score for _, score in scored_moves)
+    weights = [math.exp((score - max_score) / temperature) for _, score in scored_moves]
+    total = sum(weights)
+    return [(scored_moves[index][0], weights[index] / total) for index in range(len(weights))]
+
+
+def find_historical_move_counts(player_name: str, fen: str) -> dict[str, int]:
+    """Read exact-position move frequencies for a player from ingested PGNs."""
+    database_url = os.getenv("WORKER_DATABASE_URL") or os.getenv("DATABASE_URL", "")
+    database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    if not database_url or not player_name or player_name == "Opponent":
+        return {}
+    with psycopg.connect(database_url, connect_timeout=3) as connection:
+        rows = connection.execute(
+            """SELECT move_played, COUNT(*) AS times_played
+               FROM player_moves
+               WHERE lower(player_name) = lower(%s)
+                 AND split_part(fen, ' ', 1) = split_part(%s, ' ', 1)
+                 AND split_part(fen, ' ', 2) = split_part(%s, ' ', 2)
+                 AND split_part(fen, ' ', 3) = split_part(%s, ' ', 3)
+               GROUP BY move_played""",
+            (player_name, fen, fen, fen),
+        ).fetchall()
+    return {move_uci: count for move_uci, count in rows}
+
+
+def combine_history_and_heuristic(
+    scored_moves: list[tuple[chess.Move, float]], historical_counts: dict[str, int],
+) -> list[tuple[chess.Move, float]]:
+    heuristic = relative_move_preferences(scored_moves)
+    if not historical_counts:
+        return heuristic
+    legal_history = {move.uci(): historical_counts.get(move.uci(), 0) for move, _ in scored_moves}
+    total_history = sum(legal_history.values())
+    if not total_history:
+        return heuristic
+    return [
+        (move, 0.9 * legal_history[move.uci()] / total_history + 0.1 * heuristic_probability)
+        for (move, _), (_, heuristic_probability) in zip(scored_moves, heuristic)
+    ]
 
 
 # --- Endpoints ---
@@ -112,25 +197,24 @@ def redirect_to_docs():
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint for container and service monitoring."""
-    return {"status": "Unified ML Engine is running successfully with Redis caching!"}
+    """Unauthenticated liveness endpoint for container monitoring."""
+    return {"status": "ok"}
 
 
 @app.post("/api/v1/predict-move", response_model=MovePredictionResponse)
 async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = Depends(require_asgardeo_user)):
-    """Predicts a specific move using the PyTorch neural network, board evaluation, and Redis cache."""
+    """Rank legal moves with a transparent heuristic and optional Redis cache."""
     try:
-        board = chess.Board(request.fen)
+        try:
+            board = chess.Board(request.fen)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="Invalid FEN position.") from error
 
         if board.is_game_over():
             raise HTTPException(status_code=400, detail="Game is already over.")
 
-        legal_moves = list(board.legal_moves)
-        if not legal_moves:
-            raise HTTPException(status_code=400, detail="No legal moves available.")
-
-        # Check Redis Cache
-        cache_key = f"move:{request.fen}"
+        opponent = request.opponent_username or "Opponent"
+        cache_key = f"move:{opponent.casefold()}:{board.fen()}"
         if redis_client:
             cached_data = await redis_client.get(cache_key)
             if cached_data:
@@ -138,13 +222,18 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
                 cached_res["cached"] = True
                 return cached_res
 
-        # REAL Tensor evaluation via PyTorch
-        board_tensor = fen_to_tensor(board)
-        with torch.no_grad():
-            probabilities = model(board_tensor)
+        scored_moves = score_legal_moves(board)
+        try:
+            historical_counts = await asyncio.to_thread(find_historical_move_counts, opponent, board.fen())
+        except Exception as error:
+            logger.warning("Could not load opponent move history; using position heuristic: %s", error)
+            historical_counts = {}
+        preferences = combine_history_and_heuristic(scored_moves, historical_counts)
+        if not preferences:
+            raise HTTPException(status_code=400, detail="No legal moves available.")
 
-        # Select candidate legal move (safely picking the first one until trained)
-        selected_move = legal_moves[0]
+        selected_move, preference = max(preferences, key=lambda item: item[1])
+        used_opponent_history = any(historical_counts.get(move.uci(), 0) for move, _ in scored_moves)
         san = board.san(selected_move)
         uci = selected_move.uci()
 
@@ -155,7 +244,9 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
             "top_predicted_move": san,
             "san_move": san,
             "suggested_move": uci,
-            "confidence": 0.87,
+            "confidence": round(preference, 4),
+            "confidence_type": "historical_frequency" if used_opponent_history else "relative_heuristic",
+            "prediction_source": "opponent_history" if used_opponent_history else "position_heuristic",
             "cached": False,
         }
 
