@@ -6,20 +6,22 @@ import {
   setGameSnapshot,
   setOpponentName,
   setLoading,
+  clearStrategy,
   setStrategyAnalysis,
   applyMovePrediction,
   setError,
 } from './store/chessSlice';
-import axios from 'axios';
-import { Chessboard } from 'react-chessboard';
+import ResponsiveBoard from './ResponsiveBoard';
 import { Chess } from 'chess.js';
-import { useAuthContext } from "@asgardeo/auth-react";
-import { API_BASE_URL, getBearerHeaders } from './api';
+import { useSession } from './sessionContext';
+import { requestJson, authenticatedRequest, friendlyError } from './api';
+import { useGetPlayersQuery } from './store/chessApi';
 import { createRequestGate } from './requestGate';
 import { readReportStream } from './reportStream';
 import { restoreGame, gameSnapshot, formatEvaluation } from './gameHistory';
 import './App.css'; 
 
+const EMPTY_PLAYERS = [];
 const reportSections = [
   { id: 'profile', label: 'Player profile', kicker: 'Opponent snapshot' },
   { id: 'tendencies', label: 'Behavioral tendencies', kicker: 'Observed patterns' },
@@ -60,9 +62,9 @@ export default function App() {
   useEffect(() => () => {
     moveGate.cancel();
     strategyGate.cancel();
-    dispatch(setLoading(false));
+    dispatch(clearStrategy());
   }, [moveGate, strategyGate, dispatch]);
-  const { state, signIn, signOut, getAccessToken } = useAuthContext();
+  const { state, signIn, signOut, getAccessToken } = useSession();
 
   // --- Read Global State from Redux ---
   const { fen, opponentName, strategyAnalysis, predictedMove, loading, error, supportingGames, availableGames, initialFen, moves } = useSelector(
@@ -71,35 +73,21 @@ export default function App() {
 
   // --- Local Game & Form States ---
   const game = useMemo(() => restoreGame(initialFen, moves), [initialFen, moves]);
-  const [players, setPlayers] = useState([]);
-  const [playersLoading, setPlayersLoading] = useState(true);
-  const [playersError, setPlayersError] = useState('');
-  const [playersReload, setPlayersReload] = useState(0);
+  const playersQuery = useGetPlayersQuery(state.username || 'session', { refetchOnMountOrArgChange: 60 });
+  const players = playersQuery.data || EMPTY_PLAYERS;
+  const playersLoading = playersQuery.isFetching;
+  const playersError = playersQuery.error?.error || '';
   useEffect(() => {
-    const controller = new AbortController();
-    async function loadPlayers() {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/api/v1/players`, {
-          headers: await getBearerHeaders(getAccessToken), signal: controller.signal, timeout: 10000,
-        });
-        if (controller.signal.aborted) return;
-        const available = response.data.players;
-        setPlayers(available);
-        setPlayersError('');
-        const selected = store.getState().chess.opponentName;
-        if (!available.some((player) => player.name === selected)) dispatch(setOpponentName(available[0]?.name || ''));
-      } catch (error) {
-        if (!controller.signal.aborted) setPlayersError(error.response?.data?.detail || 'Could not load indexed players.');
-      } finally {
-        if (!controller.signal.aborted) setPlayersLoading(false);
-      }
-    }
-    loadPlayers();
-    return () => controller.abort();
-  }, [getAccessToken, store, dispatch, playersReload]);
+    if (!playersQuery.data) return;
+    const selected = store.getState().chess.opponentName;
+    if (!players.some((player) => player.name === selected)) dispatch(setOpponentName(players[0]?.name || ''));
+  }, [players, playersQuery.data, dispatch, store]);
   const selectedPlayer = players.find((player) => player.name === opponentName);
 
   const [context, setContext] = useState('');
+  const [moveInput, setMoveInput] = useState('');
+  const [promotion, setPromotion] = useState('q');
+  const [orientation, setOrientation] = useState('white');
   const [aiSuggestion, setAiSuggestion] = useState('');
   const [activeReportTab, setActiveReportTab] = useState('profile');
   const strategyTabs = strategyAnalysis?.report ? reportSections.map((section) => ({ ...section, content: strategyAnalysis.report[section.id] })) : [];
@@ -113,14 +101,13 @@ export default function App() {
     setMovePending(true);
     setMoveError('');
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/v1/predict-move`, {
-        fen: currentFen, initial_fen: initialFen, moves: snapshot.moves,
-        opponent_username: opponentName || "Opponent"
-      }, { headers: await getBearerHeaders(getAccessToken), signal: request.signal, timeout: 15000 });
+      const result = await requestJson('/api/v1/predict-move', {
+        method: 'POST', body: { fen: currentFen, initial_fen: initialFen, moves: snapshot.moves, opponent_username: opponent },
+        getAccessToken, signal: request.signal, timeout: 15000,
+      });
       const current = store.getState().chess;
       if (!moveGate.isCurrent(request) || current.fen !== currentFen || current.opponentName !== opponent || current.revision !== expectedRevision) return;
       
-      const result = response.data;
       const nextGame = restoreGame(initialFen, snapshot.moves);
       if (!result.game_over) nextGame.move(result.san_move);
       const next = gameSnapshot(nextGame);
@@ -130,7 +117,7 @@ export default function App() {
         ? `${result.san_move}: played in ${result.observed_games} of ${result.matching_games} matching games.`
         : `${result.san_move}: positional estimate; no matching games for this position.`);
     } catch (err) {
-      if (moveGate.isCurrent(request)) setMoveError(err.response?.data?.detail || err.message);
+      if (moveGate.isCurrent(request)) setMoveError(friendlyError(err));
     } finally {
       if (moveGate.isCurrent(request)) {
         moveGate.finish(request);
@@ -139,26 +126,44 @@ export default function App() {
     }
   }
 
-  function onDrop(sourceSquare, targetSquare) {
+  function playMove(move) {
     if (moveGate.busy() || !selectedPlayer || playersLoading || predictedMove?.game_over) return false;
     const gameCopy = restoreGame(initialFen, moves);
     let moveResult;
     try {
-      moveResult = gameCopy.move({
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: 'q',
-      });
+      moveResult = gameCopy.move(move);
     } catch {
-      return false; 
+      setMoveError('Enter a legal move for this position, such as Nf3 or g1f3.');
+      return false;
     }
 
     if (moveResult === null) return false;
 
     const snapshot = gameSnapshot(gameCopy);
+    setAiSuggestion('');
     dispatch(setGameSnapshot({ expectedRevision: store.getState().chess.revision, ...snapshot }));
     fetchMovePrediction(snapshot, store.getState().chess.revision);
     return true;
+  }
+
+  function onDrop(from, to) { return playMove({ from, to, promotion }); }
+  function submitMove(event) {
+    event.preventDefault();
+    const text = moveInput.trim();
+    const move = /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(text)
+      ? { from: text.slice(0,2), to: text.slice(2,4), promotion: text[4] || promotion } : text;
+    if (playMove(move)) setMoveInput('');
+  }
+  function invalidateStrategy() {
+    strategyGate.cancel(); dispatch(clearStrategy()); setEarlyStatistics([]); setReportProgress('');
+  }
+  function tabKey(event, index) {
+    const count = strategyTabs.length;
+    const next = event.key === 'ArrowRight' ? (index + 1) % count : event.key === 'ArrowLeft' ? (index + count - 1) % count
+      : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null;
+    if (next === null) return;
+    event.preventDefault(); setActiveReportTab(strategyTabs[next].id);
+    event.currentTarget.parentElement.querySelectorAll('[role="tab"]')[next].focus();
   }
 
   // --- Form Submission Logic (RAG Strategy) ---
@@ -171,25 +176,21 @@ export default function App() {
     try {
       setReportProgress('Checking indexed game evidence...');
       setEarlyStatistics([]);
-      const timer = setTimeout(() => request.abort(), 85000);
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/predict-strategy/stream`, {
-          method: 'POST', headers: { ...await getBearerHeaders(getAccessToken), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ opponent_name: opponentName, context, color: reportColor }), signal: request.signal,
-        });
-        await readReportStream(response, (event) => {
-          if (!strategyGate.isCurrent(request) || store.getState().chess.opponentName !== opponentName) return;
-          if (event.type === 'progress') setReportProgress(event.message);
-          if (event.type === 'statistics') setEarlyStatistics(event.statistics);
-          if (event.type === 'complete') {
-            dispatch(setStrategyAnalysis(event.result));
-            setReportProgress(event.result.cached ? 'Loaded cached report.' : 'Report complete.');
-            setEarlyStatistics([]);
-          }
-        });
-      } finally { clearTimeout(timer); }
+      await authenticatedRequest('/api/v1/predict-strategy/stream', {
+        method: 'POST', body: { opponent_name: opponentName, context, color: reportColor },
+        getAccessToken, signal: request.signal, timeout: 85000,
+      }, (response) => readReportStream(response, (event) => {
+        if (!strategyGate.isCurrent(request) || store.getState().chess.opponentName !== opponentName) return;
+        if (event.type === 'progress') setReportProgress(event.message);
+        if (event.type === 'statistics') setEarlyStatistics(event.statistics);
+        if (event.type === 'complete') {
+          dispatch(setStrategyAnalysis(event.result));
+          setReportProgress(event.result.cached ? 'Loaded cached report.' : 'Report complete.');
+          setEarlyStatistics([]);
+        }
+      }));
     } catch (error) {
-      if (strategyGate.isLatest(request)) dispatch(setError(request.signal.aborted ? 'Report deadline exceeded. Retry shortly.' : error.message || "Failed to generate prediction."));
+      if (strategyGate.isLatest(request)) dispatch(setError(friendlyError(error)));
     } finally {
       if (strategyGate.isLatest(request)) dispatch(setLoading(false));
       strategyGate.finish(request);
@@ -222,15 +223,23 @@ export default function App() {
             <span className="live-indicator"><i /> Analysis ready</span>
           </div>
           <div className="board-frame">
-            <Chessboard
-              position={game.fen()}
+            <ResponsiveBoard
+              position={game.fen()} boardOrientation={orientation}
               onPieceDrop={onDrop}
               arePiecesDraggable={!movePending && Boolean(selectedPlayer) && !playersLoading && !predictedMove?.game_over}
-              boardWidth={500}
               customDarkSquareStyle={{ backgroundColor: '#54715b' }}
               customLightSquareStyle={{ backgroundColor: '#e7e1d1' }}
             />
           </div>
+          <form className="keyboard-move-form" onSubmit={submitMove}>
+            <label htmlFor="dashboard-move">Play a move (SAN or UCI)</label>
+            <input id="dashboard-move" value={moveInput} onChange={(event) => setMoveInput(event.target.value)} placeholder="e4 or e2e4" autoComplete="off" />
+            <label htmlFor="dashboard-promotion">Promotion</label>
+            <select id="dashboard-promotion" value={promotion} onChange={(event) => setPromotion(event.target.value)}>
+              <option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option>
+            </select>
+            <button type="submit" className="reader-secondary-button" disabled={movePending || !selectedPlayer || playersLoading || predictedMove?.game_over}>Play move</button>
+          </form>
           {movePending && <p role="status">Waiting for the predicted reply…</p>}
           {moveError && <p role="alert">{moveError}</p>}
           <div className="board-footer">
@@ -238,6 +247,12 @@ export default function App() {
             <code>{fen.split(' ').slice(0, 4).join(' ')}</code>
           </div>
           <div className="board-history">
+            <button type="button" className="reader-secondary-button" onClick={() => setOrientation(orientation === 'white' ? 'black' : 'white')}>Flip board</button>
+            <button type="button" className="reader-secondary-button" disabled={!moves.length} onClick={() => {
+              moveGate.cancel(); setMovePending(false); setMoveError(''); setAiSuggestion('');
+              const remaining = moves.slice(0, Math.max(0, moves.length - (moves.length % 2 || 2)));
+              dispatch(setGameSnapshot({ expectedRevision: store.getState().chess.revision, ...gameSnapshot(restoreGame(initialFen, remaining)) }));
+            }}>Undo turn</button>
             <button type="button" className="reader-secondary-button" onClick={() => {
               moveGate.cancel(); setMovePending(false); setMoveError(''); setAiSuggestion('');
               dispatch(setFen(new Chess().fen()));
@@ -294,21 +309,21 @@ export default function App() {
                   {!playersLoading && !players.length && !playersError && <p>No indexed players yet. Ingest a PGN dataset to begin.</p>}
                   {playersError && <p role="alert">{playersError}</p>}
                   <button type="button" className="text-button" disabled={playersLoading || movePending}
-                    onClick={() => { setPlayersLoading(true); setPlayersReload((value) => value + 1); }}>Refresh players</button>
+                    onClick={() => playersQuery.refetch()}>Refresh players</button>
                 </div>
                 
                 <div className="input-group">
-                  <label>Opening / Context</label>
+                  <label htmlFor="strategy-context">Opening / Context</label>
                   <input 
-                    type="text" 
+                    id="strategy-context" type="text" maxLength={2000}
                     value={context} 
-                    onChange={(e) => setContext(e.target.value)} 
+                    onChange={(e) => { invalidateStrategy(); setContext(e.target.value); }}
                     placeholder="e.g., Plays the Sicilian Najdorf"
                   />
                 </div>
 
                 <div className="input-group"><label htmlFor="report-color">Opponent color</label>
-                  <select id="report-color" value={reportColor} disabled={loading} onChange={(event) => setReportColor(event.target.value)}>
+                  <select id="report-color" value={reportColor} onChange={(event) => { invalidateStrategy(); setReportColor(event.target.value); }}>
                     <option value="any">Both colors</option><option value="white">White</option><option value="black">Black</option>
                   </select>
                 </div>
@@ -381,6 +396,8 @@ export default function App() {
                             type="button"
                             role="tab"
                             aria-selected={visibleReportTab?.id === tab.id}
+                            tabIndex={visibleReportTab?.id === tab.id ? 0 : -1}
+                            onKeyDown={(event) => tabKey(event, index)}
                             aria-controls={`${tab.id}-panel`}
                             onClick={() => setActiveReportTab(tab.id)}
                           >
@@ -388,20 +405,22 @@ export default function App() {
                           </button>
                         ))}
                       </div>
-                      {visibleReportTab && (
+                      {strategyTabs.map((tab, index) => (
                         <section
+                          key={tab.id}
+                          hidden={visibleReportTab?.id !== tab.id}
                           className="report-panel"
-                          id={`${visibleReportTab.id}-panel`}
-                          role="tabpanel"
-                          aria-labelledby={`${visibleReportTab.id}-tab`}
+                          id={`${tab.id}-panel`}
+                          role="tabpanel" tabIndex={0}
+                          aria-labelledby={`${tab.id}-tab`}
                         >
                           <div className="report-panel-heading">
-                            <div className="report-section-number">{String(strategyTabs.indexOf(visibleReportTab) + 1).padStart(2, '0')}</div>
-                            <div><span>{visibleReportTab.kicker}</span><h4>{visibleReportTab.label}</h4></div>
+                            <div className="report-section-number">{String(index + 1).padStart(2, '0')}</div>
+                            <div><span>{tab.kicker}</span><h4>{tab.label}</h4></div>
                           </div>
-                          <ReportContent content={visibleReportTab.content} sources={strategyAnalysis.sources} />
+                          {visibleReportTab?.id === tab.id && <ReportContent content={tab.content} sources={strategyAnalysis.sources} />}
                         </section>
-                      )}
+                      ))}
                       <h4>Evidence limitations</h4><ul>{strategyAnalysis.report.limitations.map((text, index) => <li key={index}>{text}</li>)}</ul>
                       <h4>Supporting games</h4>{strategyAnalysis.sources.map((source, index) => <details key={source.id} id={`game-${source.id}`}>
                         <summary>Game {index + 1}: {source.white} vs {source.black} ? {source.result} ? {source.date}</summary>

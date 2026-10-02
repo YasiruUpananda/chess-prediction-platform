@@ -1,24 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Document, Page, pdfjs } from 'react-pdf';
-import { Chessboard } from 'react-chessboard';
+import ResponsiveBoard from './ResponsiveBoard';
 import { Chess } from 'chess.js';
 import { parseChessText, textBlocks, EXTRACTION_VERSION } from './chessPdf';
 import { restoreGame, gameSnapshot } from './gameHistory';
-import axios from 'axios';
-import { useAuthContext } from '@asgardeo/auth-react';
-import { API_BASE_URL, getBearerHeaders, waitForPoll } from './api';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
-
-// Keep the worker version in lockstep with the installed pdfjs-dist package.
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+import { useSession } from './sessionContext';
+import { requestJson, friendlyError, waitForPoll } from './api';
+const PdfDocumentView = lazy(() => import('./PdfDocumentView'));
 
 export default function PdfReader() {
-  const { getAccessToken } = useAuthContext();
+  const { getAccessToken } = useSession();
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfDocument, setPdfDocument] = useState(null);
   const [numPages, setNumPages] = useState(0);
@@ -33,6 +24,7 @@ export default function PdfReader() {
   const game = useMemo(() => restoreGame(initialFen, timeline.slice(0, cursor)), [initialFen, timeline, cursor]);
   const [orientation, setOrientation] = useState('white');
   const [promotion, setPromotion] = useState('q');
+  const [moveInput, setMoveInput] = useState('');
   const [lines, setLines] = useState([]);
   const [selectedLine, setSelectedLine] = useState(0);
   const [editor, setEditor] = useState('');
@@ -109,17 +101,17 @@ export default function PdfReader() {
             canvas.width = 0; canvas.height = 0;
             if (!blob || blob.size > 8 * 1024 * 1024) throw new Error('Page image exceeds the 8 MB OCR upload limit.');
             const formData = new FormData(); formData.append('file', blob, 'page.png'); formData.append('page', String(pageNumber));
-            let job = (await axios.post(`${API_BASE_URL}/api/v1/extract-page-image`, formData, {
-              signal: controller.signal, headers: await getBearerHeaders(getAccessToken), timeout: 30000,
-            })).data;
+            let job = await requestJson('/api/v1/extract-page-image', { method: 'POST', body: formData,
+              signal: controller.signal, getAccessToken, timeout: 30000,
+            });
             const deadline = Date.now() + 3 * 60 * 1000;
             while (job.status === 'queued' || job.status === 'running') {
               if (Date.now() > deadline) throw new Error('OCR is taking too long. Try this page again later.');
               setMoveStatus(job.status === 'queued' ? 'Page queued for OCR...' : 'Reading this page image...');
               await waitForPoll(controller.signal);
-              job = (await axios.get(`${API_BASE_URL}/api/v1/ocr-jobs/${job.job_id}`, {
-                signal: controller.signal, timeout: 10000, headers: await getBearerHeaders(getAccessToken),
-              })).data;
+              job = await requestJson(`/api/v1/ocr-jobs/${job.job_id}`, {
+                signal: controller.signal, timeout: 10000, getAccessToken,
+              });
             }
             if (job.status !== 'completed') throw new Error(job.error || 'OCR could not process this page.');
             const items = (job.result.text_items || []).map((item) => ({ ...item, transform: [1, 0, 0, item.height, item.x, -item.y] }));
@@ -137,7 +129,7 @@ export default function PdfReader() {
         setExtractionInfo({ ...extracted, cached, confidence: found[0]?.confidence || 'low', issue: found[0]?.issue || '' });
         setMoveStatus(found.length ? `${found.length} lines found. Review a line and its starting position before replaying.` : 'No numbered chess line found. You can correct the text or try page OCR.');
       } catch (error) {
-        if (!controller.signal.aborted) setMoveStatus(`Could not read this page: ${error.response?.data?.detail || error.message}`);
+        if (!controller.signal.aborted) setMoveStatus(`Could not read this page: ${friendlyError(error)}`);
       } finally {
         if (canvas) { canvas.width = 0; canvas.height = 0; }
         if (!controller.signal.aborted) setIsExtracting(false);
@@ -267,19 +259,13 @@ export default function PdfReader() {
                 <button className="reader-secondary-button" type="button" onClick={() => { setForceOCR(false); setPageNumber((page) => Math.min(numPages, page + 1)); }} disabled={!numPages || pageNumber >= numPages}>Next →</button>
               </div>
               <div className="pdf-page-stage">
-                <Document
-                  file={pdfFile}
-                  onLoadSuccess={onDocumentLoadSuccess}
-                  onLoadError={(error) => setPdfError(`This PDF could not be opened: ${error.message}`)}
-                  loading={<div className="reader-placeholder">Opening your PDF…</div>}
-                  error={<div className="reader-placeholder">This PDF could not be opened. Try another file.</div>}
-                  noData={<div className="reader-placeholder">Choose a PDF to begin reading.</div>}
-                >
-                  {pageGeometry?.document === pdfDocument && pageGeometry.page === pageNumber && pageGeometry.width === pageWidth
-                    ? pageGeometry.safe ? <Page pageNumber={pageNumber} width={pageWidth} devicePixelRatio={Math.min(2, window.devicePixelRatio || 1)} renderAnnotationLayer renderTextLayer />
-                      : <p className="reader-error">Page dimensions exceed the rendering limit.</p>
-                    : <div className="reader-placeholder">Checking page dimensions...</div>}
-                </Document>
+                <Suspense fallback={<div className="reader-placeholder">Loading PDF viewer...</div>}>
+                  <PdfDocumentView file={pdfFile} onLoadSuccess={onDocumentLoadSuccess}
+                    onLoadError={(error) => setPdfError(`This PDF could not be opened: ${error.message}`)}
+                    pageNumber={pageNumber} width={pageWidth}
+                    geometryReady={pageGeometry?.document === pdfDocument && pageGeometry.page === pageNumber && pageGeometry.width === pageWidth}
+                    safe={pageGeometry?.safe} />
+                </Suspense>
               </div>
             </>
           )}
@@ -290,8 +276,16 @@ export default function PdfReader() {
           <section className="reader-board-card panel">
             <div className="reader-panel-heading"><div><span className="eyebrow">Interactive board</span><h2>Try the position</h2></div><span className="reader-turn">{game.turn() === 'w' ? 'White to move' : 'Black to move'}</span></div>
             <div className="reader-board-frame">
-              <Chessboard position={game.fen()} boardOrientation={orientation} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#54715b' }} customLightSquareStyle={{ backgroundColor: '#e7e1d1' }} />
+              <ResponsiveBoard position={game.fen()} boardOrientation={orientation} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#54715b' }} customLightSquareStyle={{ backgroundColor: '#e7e1d1' }} />
             </div>
+            <form className="keyboard-move-form" onSubmit={(event) => {
+              event.preventDefault(); const text = moveInput.trim();
+              const move = /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(text) ? { from: text.slice(0,2), to: text.slice(2,4), promotion: text[4] || promotion } : text;
+              if (commitMove(move)) setMoveInput('');
+            }}><label htmlFor="reader-keyboard-move">Play a move (SAN or UCI)</label>
+              <input id="reader-keyboard-move" value={moveInput} onChange={(event) => setMoveInput(event.target.value)} autoComplete="off" placeholder="e4 or e2e4" />
+              <button className="reader-secondary-button" type="submit">Play move</button>
+            </form>
             <p className="reader-status" aria-live="polite">{moveStatus}</p>
             <div className="reader-board-actions">
               <button className="reader-secondary-button" onClick={() => setCursor(Math.max(0, cursor - 1))} disabled={!cursor}>Previous move</button>

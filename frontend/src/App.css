@@ -88,3 +88,14 @@
 .reader-field { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; color: #c4d0c8; font-size: 12px; }
 .reader-field textarea, .reader-field select { width: 100%; padding: 9px; border: 1px solid #54715b; border-radius: 6px; background: #111a17; color: #edf2ee; }
 .reader-field textarea { resize: vertical; font-family: ui-monospace, monospace; }
+.responsive-board { width: 100%; min-width: 0; }
+.keyboard-move-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
+.keyboard-move-form input, .keyboard-move-form select { min-width: 0; max-width: 100%; border: 1px solid #54715b; border-radius: 6px; padding: 8px; background: #17211d; color: #edf2ee; }
+.keyboard-move-form label { font-size: 12px; color: #c4d0c8; }
+.authentication-recovery { position: sticky; top: 0; z-index: 100; display: flex; gap: 15px; flex-wrap: wrap; align-items: center; padding: 16px; color: #fff; background: #70382c; }
+.authentication-recovery button { padding: 8px 12px; }
+:focus-visible { outline: 3px solid #c6e05b; outline-offset: 3px; }
+.board-frame { width: 100%; max-width: 500px; box-sizing: border-box; }
+.board-footer code { overflow-wrap: anywhere; }
+.dashboard > *, .analysis-column > * { min-width: 0; }
+@media (max-width: 900px) { .dashboard { grid-template-columns: minmax(0, 1fr); } }
