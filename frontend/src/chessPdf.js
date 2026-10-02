@@ -1,8 +1,51 @@
 ﻿import { Chess } from 'chess.js';
-export const EXTRACTION_VERSION = 'layout-rav-v4';
+export const EXTRACTION_VERSION = 'layout-symbols-v5';
 const SAN = /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)$/;
 const UNKNOWN_GLYPH = /[\uFFFD\uE000-\uF8FF¤]/;
 const unreadableMove = (token) => UNKNOWN_GLYPH.test(token) || (!SAN.test(token) && /^[^\s]+[a-h][1-8][+#]?$/.test(token));
+
+// A PDF chess font may encode a knight as an arbitrary character. Never map
+// those characters globally: they can also occur in ordinary book prose.
+export function applyPieceMappings(text, mappings = {}) {
+  return Array.from(text).map((glyph, index, chars) => {
+    const piece = mappings[glyph];
+    if (!/^[KQRBN]$/.test(piece || '')) return glyph;
+    const suffix = chars.slice(index + 1, index + 14).join('');
+    return /^\s*[a-h]?[1-8]?x?[a-h][1-8](?:[+#!?\s.,()]|$)/.test(suffix) ? piece : glyph;
+  }).join('');
+}
+
+export function customPieceSymbols(text) {
+  const normalized = normalizeChessText(text);
+  return [...new Set([...normalized.matchAll(/(?<![\p{L}\p{N}])([^\s.(){}\d])\s*([a-h]?[1-8]?x?[a-h][1-8])(?=[+#!?\s.,()]|$)/gu)]
+    .filter((match) => !SAN.test(match[1] + match[2]))
+    .map((match) => match[1]))];
+}
+
+// Suggest a symbol only when every complete legal reading agrees on its piece.
+// Search is bounded; ambiguous or incomplete evidence stays manual.
+export function suggestPieceMappings(raw, initialFen) {
+  const tokens = normalizeChessText(raw).split(/\s+/).filter(Boolean);
+  let budget = 512;
+  const solutions = [];
+  function visit(index, board, mappings) {
+    if (--budget < 0) return;
+    if (index === tokens.length) { solutions.push(mappings); return; }
+    const token = tokens[index];
+    const custom = /^([^\s])([a-h]?[1-8]?x?[a-h][1-8][+#]?)$/.exec(token);
+    const glyph = !SAN.test(token) && custom ? custom[1] : null;
+    const pieces = glyph ? (mappings[glyph] ? [mappings[glyph]] : ['K','Q','R','B','N']) : [''];
+    for (const piece of pieces) {
+      const next = new Chess(board.fen());
+      try { next.move(glyph ? piece + custom[2] : token); }
+      catch { continue; }
+      visit(index + 1, next, glyph ? { ...mappings, [glyph]: piece } : mappings);
+    }
+  }
+  visit(0, new Chess(initialFen), {});
+  if (budget < 0 || !solutions.length) return {};
+  return Object.fromEntries(Object.entries(solutions[0]).filter(([glyph,piece]) => solutions.every((solution)=>solution[glyph]===piece)));
+}
 
 export function normalizeChessText(text) {
   return text.replace(/[\uFE0E\uFE0F]/g, '').replace(/[♔♚]/g, 'K').replace(/[♕♛]/g, 'Q').replace(/[♖♜]/g, 'R')
@@ -12,7 +55,7 @@ export function normalizeChessText(text) {
     .replace(/(\d)\s+(\.)/g, '$1$2')
     .replace(/\b([KQRBN])\s+(?=[a-h1-8x]*[a-h][1-8])/g, '$1')
     // PDF text runs can concatenate a pawn move and a figurine move.
-    .replace(/([a-h][1-8](?:=[QRBN])?[+#]?)(?=[KQRBN][a-h1-8x]*[a-h][1-8])/g, '$1 ')
+    .replace(/([a-h][1-8](?:=[QRBN])?[+#]?)(?=[^\s.(){}\d][a-h1-8x]*[a-h][1-8])/g, '$1 ')
     .replace(/([^\p{L}\p{N}\s.(){}!?=+#$-])\s+(?=[a-h1-8x]*[a-h][1-8])/gu, '$1');
 }
 
@@ -120,9 +163,9 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
   });
 }
 
-export function parseChessText(text, fen, allowUnnumbered = false) {
+export function parseChessText(text, fen, allowUnnumbered = false, mappings = {}) {
   // Separate glued numbering without losing SAN tokens.
-  return extractChessLines(normalizeChessText(text).replace(/(\d+\.(?:\.\.)?)(?=[KQRBNabcdefghO])/g, '$1 '), fen, allowUnnumbered);
+  return extractChessLines(normalizeChessText(applyPieceMappings(text, mappings)).replace(/(\d+\.(?:\.\.)?)(?=[KQRBNabcdefghO])/g, '$1 '), fen, allowUnnumbered);
 }
 
 export function extractSanMoves(rawText, initialFen) {

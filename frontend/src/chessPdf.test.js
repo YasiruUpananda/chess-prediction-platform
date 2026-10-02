@@ -1,10 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
-import { parseChessText, extractSanMoves, textBlocks } from './chessPdf.js';
+import { parseChessText, extractSanMoves, textBlocks, customPieceSymbols, suggestPieceMappings, applyPieceMappings } from './chessPdf.js';
 import { restoreGame, gameSnapshot } from './gameHistory.js';
 
 const bookLine='1.c4 c6 2.e4 d5 3.exd5 ♘f6 4.♘c3 cxd5 5.cxd5 ♘xd5 6.♘f3 e6 7.♗c4 ♘c6 8.0-0 ♗e7 9.d4 0-0 10.♖e1 ♘f6';
+test('custom book fonts are mapped consistently and recover the complete 20-ply line',()=>{
+  const encoded=bookLine.replaceAll('♘','\uE123').replaceAll('♗','¤').replaceAll('♖','§');
+  assert.deepEqual(customPieceSymbols(encoded),['\uE123','¤','§']);
+  const retained=parseChessText(encoded)[0];
+  assert.equal(retained.moves.length,5);
+  const mapping=suggestPieceMappings(retained.raw);
+  // Both Qe1 and Re1 are legal: never invent the rook's identity.
+  assert.deepEqual(mapping,{'\uE123':'N','¤':'B'});
+  mapping['§']='R';
+  const repaired=parseChessText(encoded,undefined,false,mapping)[0];
+  assert.equal(repaired.moves.length,20);
+  assert.equal(repaired.issue,'');
+  assert.equal(parseChessText(encoded.replaceAll('\uE123','\uE123 '),undefined,false,mapping)[0].moves.length,20);
+  assert.equal(applyPieceMappings('¤ ordinary prose ¤f6',{'¤':'N'}),'¤ ordinary prose Nf6');
+});
+
+test('ambiguous piece identities require manual confirmation',()=>{
+  // Both the queen and bishop can legally go to e2 after e4 e5.
+  assert.deepEqual(suggestPieceMappings('e4 e5 ¤e2'),{});
+  assert.deepEqual(parseChessText('1.e4 e5 2.¤e2',undefined,false,{'¤':'B'})[0].moves,['e4','e5','Be2']);
+  assert.deepEqual(customPieceSymbols('1.exd5 Nf6 2.Nc3 cxd5'),[]);
+});
 test('the supplied book line retains all ten white and black moves',()=>{
   const line=parseChessText(bookLine)[0];
   assert.equal(line.moves.length,20);

@@ -1,14 +1,30 @@
 import { test, expect } from '@playwright/test';
 import { Buffer } from 'node:buffer';
 
-function pdfFixture() {
-  const text='BT /F1 14 Tf 10 160 Td (1.e4 e5 2.Nf3 Nc6) Tj ET';
-  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${text.length} >>\nstream\n${text}\nendstream`];
+function pdfFixture(moves='1.e4 e5 2.Nf3 Nc6') {
+  const text=`BT /F1 14 Tf 10 160 Td (${moves}) Tj ET`;
+  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${text.length} >>\nstream\n${text}\nendstream`];
   let pdf='%PDF-1.4\n';const offsets=[];
   objects.forEach((object,index)=>{offsets.push(pdf.length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});
   const xref=pdf.length;
   return Buffer.from(pdf+`xref\n0 6\n0000000000 65535 f \n${offsets.map(offset=>String(offset).padStart(10,'0')+' 00000 n ').join('\n')}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
 }
+
+test('custom font characters can be confirmed as pieces and recover all twenty plies',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  await page.goto('/reader');
+  const encoded='1.c4 c6 2.e4 d5 3.exd5 Xf6 4.Xc3 cxd5 5.cxd5 Xxd5 6.Xf3 e6 7.Yc4 Xc6 8.0-0 Ye7 9.d4 0-0 10.Ze1 Xf6';
+  await page.getByLabel('Choose a PDF to read').setInputFiles({name:'custom-font.pdf',mimeType:'application/pdf',buffer:pdfFixture(encoded)});
+  await expect(page.locator('.reader-move-chip')).toHaveCount(5);
+  await expect(page.getByLabel('Extracted symbol “X”', {exact:false})).toHaveValue('N');
+  await expect(page.getByLabel('Extracted symbol “Y”', {exact:false})).toHaveValue('B');
+  await page.getByLabel('Extracted symbol “Z”', {exact:false}).selectOption('R');
+  await page.getByRole('button',{name:'Apply piece symbols to this book'}).click();
+  await expect(page.locator('.reader-move-chip')).toHaveCount(20);
+  await page.getByRole('button',{name:'Load reviewed line'}).click();
+  await page.getByRole('region',{name:'Book move replay'}).locator('.reader-move-chip').last().click();
+  await expect(page.getByRole('region',{name:'Book move replay'})).toContainText('20 / 20 plies');
+});
 
 test('book replay sits under the board, pauses for nested choices and supports arrows',async({page})=>{
   await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
