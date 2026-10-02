@@ -31,7 +31,7 @@ def run_extract(page, content):
                     HEALTH_FILE.touch()
                     time.sleep(0.25)
                 if process.returncode:
-                    raise ValueError("Unable to read this page; check the PDF and page number")
+                    raise ValueError("Unable to read this page; check the uploaded PDF or page image")
                 output.seek(0)
                 return json.load(output)
             finally:

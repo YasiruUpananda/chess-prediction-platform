@@ -346,3 +346,28 @@ def ocr_status(job_id: UUID, _user: dict[str, Any] = Depends(require_asgardeo_us
     if job is None:
         raise HTTPException(status_code=404, detail="OCR job not found or expired.")
     return job
+
+
+@app.post("/api/v1/extract-page-image", status_code=202)
+async def extract_page_image(file: UploadFile = File(...), page: int = Form(...),
+                             _user: dict[str, Any] = Depends(require_asgardeo_user)):
+    try:
+        if page<1:
+            raise HTTPException(status_code=400,detail="Page number must be at least 1.")
+        content = await file.read(8*1024*1024+1)
+        if len(content)>8*1024*1024:
+            raise HTTPException(status_code=413,detail="Page image exceeds the 8 MB limit.")
+        try:
+            job = await asyncio.to_thread(ocr_jobs.submit_image,_user['sub'],page,content)
+        except (ValueError, OSError) as error:
+            raise HTTPException(status_code=400,detail=str(error)) from error
+        return await asyncio.to_thread(ocr_jobs.get,job['job_id'],_user['sub'])
+    except ocr_jobs.QueueFull as error:
+        raise HTTPException(status_code=429,detail=str(error),headers={"Retry-After":"5"}) from error
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.warning("Page OCR queue unavailable (%s)",type(error).__name__)
+        raise HTTPException(status_code=503,detail="OCR queue is temporarily unavailable.") from error
+    finally:
+        await file.close()

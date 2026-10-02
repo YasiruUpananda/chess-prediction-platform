@@ -40,6 +40,8 @@ def init_db():
                 started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ
             );
             CREATE INDEX IF NOT EXISTS idx_ocr_status ON ocr_jobs(status, created_at);
+            ALTER TABLE ocr_jobs ADD COLUMN IF NOT EXISTS cache_key TEXT;
+            CREATE INDEX IF NOT EXISTS idx_ocr_owner_cache ON ocr_jobs(owner,cache_key);
         """)
         # Older rows were written with legal FENs; normalize legal EP state too.
         import chess
