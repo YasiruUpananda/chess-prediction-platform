@@ -59,6 +59,9 @@ Use an absolute bind-mount path if your shell does not resolve the relative path
 schema first to check backend drift. Builds run strict type checking. Contract
 checks verify that missing positions, invalid report colors and nonnumeric game
 counts fail compilation. Static types do not replace server-side validation.
+The chessboard type path points explicitly at the locked v4 package entry. This
+avoids stale v5 `Chessboard.d.ts` files in Windows synced `node_modules` folders
+shadowing v4's `chessboard` directory; it does not change runtime resolution.
 
 ## React Compiler
 

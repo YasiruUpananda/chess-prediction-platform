@@ -3,6 +3,7 @@
     "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
     "strict": true, "noEmit": true, "allowJs": true, "checkJs": false,
+    "paths": { "react-chessboard": ["./node_modules/react-chessboard/dist/chessboard/index.d.ts"] },
     "skipLibCheck": true, "types": ["vite/client"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
