@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useSelector, useDispatch, useStore } from 'react-redux';
 import {
   setFen,
+  setGameSnapshot,
   setOpponentName,
   setLoading,
   setStrategyAnalysis,
@@ -15,79 +16,35 @@ import { Chess } from 'chess.js';
 import { useAuthContext } from "@asgardeo/auth-react";
 import { API_BASE_URL, getBearerHeaders } from './api';
 import { createRequestGate } from './requestGate';
+import { readReportStream } from './reportStream';
+import { restoreGame, gameSnapshot, formatEvaluation } from './gameHistory';
 import './App.css'; 
 
 const reportSections = [
-  { id: 'profile', label: 'Player profile', kicker: 'Opponent snapshot', match: null },
-  { id: 'tendencies', label: 'Behavioral tendencies', kicker: 'Pattern recognition', match: /AI-Driven Behavioral Tendencies/i },
-  { id: 'weaknesses', label: 'Exploitable weaknesses', kicker: 'Pressure points', match: /Exploitable Weaknesses|Structural Vulnerabilities/i },
-  { id: 'predictions', label: 'Strategic predictions', kicker: 'What to expect', match: /Strategic Predictions/i },
-  { id: 'countermeasures', label: 'Countermeasures', kicker: 'The playbook', match: /Recommended Countermeasures|The Playbook/i },
+  { id: 'profile', label: 'Player profile', kicker: 'Opponent snapshot' },
+  { id: 'tendencies', label: 'Behavioral tendencies', kicker: 'Observed patterns' },
+  { id: 'weaknesses', label: 'Potential weaknesses', kicker: 'Tentative inferences' },
+  { id: 'recommendations', label: 'Recommendations', kicker: 'Preparation ideas' },
 ];
 
-function getReportTabs(report) {
-  const lines = report.split('\n');
-  const sectionStarts = reportSections.slice(1).map((section) => ({
-    ...section,
-    line: lines.findIndex((line) => section.match.test(line)),
-  })).filter((section) => section.line !== -1);
-
-  const profileEnd = sectionStarts[0]?.line ?? lines.length;
-  const tabs = [{ ...reportSections[0], content: lines.slice(0, profileEnd).join('\n').trim() }]
-    .filter((section) => section.content);
-
-  sectionStarts.forEach((section, index) => {
-    const nextStart = sectionStarts[index + 1]?.line ?? lines.length;
-    tabs.push({ ...section, content: lines.slice(section.line + 1, nextStart).join('\n').trim() });
-  });
-
-  return tabs.length ? tabs : [{ ...reportSections[0], content: report }];
+function Statistics({ statistics }) {
+  return <details className="report-statistics" open><summary>Verified game statistics</summary>
+    <ul>{statistics.map((stat) => <li key={stat.id} id={`stat-${stat.id}`}>
+      {stat.type === 'sample' ? `${stat.games} indexed games in this sample` :
+        stat.type === 'result' ? `${stat.color}: result ${stat.result} in ${stat.games} games` :
+        stat.type === 'opening' ? `${stat.line}: ${stat.games} games` :
+        `Recurring position: ${stat.games} games (${stat.position_key})`}
+      <details><summary>Source game references</summary>{stat.game_ids?.map((id) => <code key={id}>{id}<br /></code>)}</details>
+    </li>)}</ul>
+  </details>;
 }
 
-function cleanReportLine(line) {
-  return line
-    .replace(/^\s{0,3}#{1,6}\s*/, '')
-    .replace(/^\s*\d+\.\s*/, '')
-    .replace(/\*\*/g, '')
-    .replace(/`/g, '')
-    .trim();
-}
-
-function ReportContent({ content }) {
-  // Some reports include a text decision tree. Keep it as one preformatted block
-  // so the generated branches remain aligned instead of becoming separate paragraphs.
-  const isDecisionTree = /[│├┤┬┴┌┐└┘─┼]/.test(content)
-    || content.split('\n').filter((line) => line.includes('|')).length >= 2;
-
-  if (isDecisionTree) {
-    const diagram = content
-      .split('\n')
-      .filter((line) => !/^\s*```/.test(line))
-      .map((line) => line
-        .replace(/^\s{0,3}#{1,6}\s*/, '')
-        .replace(/^\s*\d+\.\s*/, '')
-        .replace(/\*\*/g, '')
-        .replace(/`/g, ''))
-      .join('\n')
-      .trim();
-
-    return <pre className="report-diagram">{diagram}</pre>;
-  }
-
-  return (
-    <div className="report-content">
-      {content.split('\n').map((line, index) => {
-        const trimmed = line.trim();
-        const text = cleanReportLine(line);
-        if (!text || /^```/.test(trimmed)) return null;
-        if (/^---+$/.test(text)) return <div className="report-divider" key={index} />;
-        if (/^\[.+\]$/.test(text)) return <h5 key={index}>{text.slice(1, -1)}</h5>;
-        if (/^#{1,6}\s/.test(trimmed)) return <h5 key={index}>{text}</h5>;
-        if (/^[*+-]\s+/.test(trimmed)) return <p className="report-bullet" key={index}>{text.replace(/^[*+-]\s*/, '')}</p>;
-        return <p key={index}>{text}</p>;
-      })}
-    </div>
-  );
+function ReportContent({ content, sources }) {
+  return <div className="report-content">{content.length ? content.map((claim, index) => <article key={index}>
+    <p>{claim.text}</p><small>{claim.confidence === 'tentative' ? 'Tentative inference' : 'Evidence supported'}</small>
+    <p>{claim.source_game_ids.map((id) => <a key={id} href={`#game-${id}`}>Game {sources.findIndex((source) => source.id === id) + 1} </a>)}
+      {claim.statistic_ids.map((id) => <a key={id} href={`#stat-${id}`}>Statistic {id} </a>)}</p>
+  </article>) : <p>Insufficient evidence for claims in this section.</p>}</div>;
 }
 
 export default function App() {
@@ -97,6 +54,9 @@ export default function App() {
   const strategyGate = useMemo(() => createRequestGate(), []);
   const [movePending, setMovePending] = useState(false);
   const [moveError, setMoveError] = useState('');
+  const [reportProgress, setReportProgress] = useState('');
+  const [earlyStatistics, setEarlyStatistics] = useState([]);
+  const [reportColor, setReportColor] = useState('any');
   useEffect(() => () => {
     moveGate.cancel();
     strategyGate.cancel();
@@ -105,51 +65,70 @@ export default function App() {
   const { state, signIn, signOut, getAccessToken } = useAuthContext();
 
   // --- Read Global State from Redux ---
-  const { fen, opponentName, strategyAnalysis, predictedMove, loading, error, supportingGames, availableGames } = useSelector(
+  const { fen, opponentName, strategyAnalysis, predictedMove, loading, error, supportingGames, availableGames, initialFen, moves } = useSelector(
     (state) => state.chess
   );
 
   // --- Local Game & Form States ---
-  const game = useMemo(() => {
-    try {
-      return new Chess(fen);
-    } catch {
-      return new Chess();
+  const game = useMemo(() => restoreGame(initialFen, moves), [initialFen, moves]);
+  const [players, setPlayers] = useState([]);
+  const [playersLoading, setPlayersLoading] = useState(true);
+  const [playersError, setPlayersError] = useState('');
+  const [playersReload, setPlayersReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadPlayers() {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/api/v1/players`, {
+          headers: await getBearerHeaders(getAccessToken), signal: controller.signal, timeout: 10000,
+        });
+        if (controller.signal.aborted) return;
+        const available = response.data.players;
+        setPlayers(available);
+        setPlayersError('');
+        const selected = store.getState().chess.opponentName;
+        if (!available.some((player) => player.name === selected)) dispatch(setOpponentName(available[0]?.name || ''));
+      } catch (error) {
+        if (!controller.signal.aborted) setPlayersError(error.response?.data?.detail || 'Could not load indexed players.');
+      } finally {
+        if (!controller.signal.aborted) setPlayersLoading(false);
+      }
     }
-  }, [fen]);
+    loadPlayers();
+    return () => controller.abort();
+  }, [getAccessToken, store, dispatch, playersReload]);
+  const selectedPlayer = players.find((player) => player.name === opponentName);
+
   const [context, setContext] = useState('');
   const [aiSuggestion, setAiSuggestion] = useState('');
   const [activeReportTab, setActiveReportTab] = useState('profile');
-  const strategyTabs = strategyAnalysis ? getReportTabs(strategyAnalysis) : [];
+  const strategyTabs = strategyAnalysis?.report ? reportSections.map((section) => ({ ...section, content: strategyAnalysis.report[section.id] })) : [];
   const visibleReportTab = strategyTabs.find((tab) => tab.id === activeReportTab) || strategyTabs[0];
 
   // --- Chessboard Logic ---
-  async function fetchMovePrediction(currentFen) {
+  async function fetchMovePrediction(snapshot, expectedRevision) {
+    const currentFen = snapshot.fen;
     const request = moveGate.begin();
     const opponent = opponentName;
     setMovePending(true);
     setMoveError('');
     try {
       const response = await axios.post(`${API_BASE_URL}/api/v1/predict-move`, {
-        fen: currentFen,
+        fen: currentFen, initial_fen: initialFen, moves: snapshot.moves,
         opponent_username: opponentName || "Opponent"
       }, { headers: await getBearerHeaders(getAccessToken), signal: request.signal, timeout: 15000 });
       const current = store.getState().chess;
-      if (!moveGate.isCurrent(request) || current.fen !== currentFen || current.opponentName !== opponent) return;
+      if (!moveGate.isCurrent(request) || current.fen !== currentFen || current.opponentName !== opponent || current.revision !== expectedRevision) return;
       
-      const aiMove = response.data.san_move;
-      const cacheNote = response.data.cached ? ' (Cached via Redis)' : '';
-      const source = response.data.prediction_source === 'opponent_history' ? 'opponent game history' : 'position heuristic';
-      setAiSuggestion(`Suggested: ${aiMove} (${response.data.suggested_move}) - Relative preference: ${Math.round(response.data.confidence * 100)}% - Source: ${source}${cacheNote}`);
-      
-      // Automatically execute the AI's counter-move on the board
-      const nextGame = new Chess(currentFen);
-      try {
-        nextGame.move(aiMove);
-        dispatch(applyMovePrediction({ expectedFen: currentFen, opponent, response: response.data, nextFen: nextGame.fen() }));
-      } catch (error) {
-        console.error("Failed to apply AI move:", error);
-      }
+      const result = response.data;
+      const nextGame = restoreGame(initialFen, snapshot.moves);
+      if (!result.game_over) nextGame.move(result.san_move);
+      const next = gameSnapshot(nextGame);
+      dispatch(applyMovePrediction({ expectedFen: currentFen, expectedRevision, opponent,
+        response: result, nextFen: next.fen, nextMoves: next.moves, nextPgn: next.pgn }));
+      setAiSuggestion(result.game_over ? `Game over: ${result.outcome}` : result.matching_games
+        ? `${result.san_move}: played in ${result.observed_games} of ${result.matching_games} matching games.`
+        : `${result.san_move}: positional estimate; no matching games for this position.`);
     } catch (err) {
       if (moveGate.isCurrent(request)) setMoveError(err.response?.data?.detail || err.message);
     } finally {
@@ -161,8 +140,8 @@ export default function App() {
   }
 
   function onDrop(sourceSquare, targetSquare) {
-    if (moveGate.busy()) return false;
-    const gameCopy = new Chess(game.fen());
+    if (moveGate.busy() || !selectedPlayer || playersLoading || predictedMove?.game_over) return false;
+    const gameCopy = restoreGame(initialFen, moves);
     let moveResult;
     try {
       moveResult = gameCopy.move({
@@ -176,26 +155,43 @@ export default function App() {
 
     if (moveResult === null) return false;
 
-    dispatch(setFen(gameCopy.fen()));
-    fetchMovePrediction(gameCopy.fen());
+    const snapshot = gameSnapshot(gameCopy);
+    dispatch(setGameSnapshot({ expectedRevision: store.getState().chess.revision, ...snapshot }));
+    fetchMovePrediction(snapshot, store.getState().chess.revision);
     return true;
   }
 
   // --- Form Submission Logic (RAG Strategy) ---
   const handleGeneratePrediction = async (e) => {
     e.preventDefault();
+    if (!selectedPlayer) return;
     const request = strategyGate.begin();
     dispatch(setLoading(true));
     
     try {
-      const response = await axios.post(`${API_BASE_URL}/api/v1/predict-strategy`, {
-        opponent_name: opponentName || "Magnus Carlsen",
-        context: context
-      }, { headers: await getBearerHeaders(getAccessToken), signal: request.signal, timeout: 90000 });
-      if (strategyGate.isCurrent(request)) dispatch(setStrategyAnalysis(response.data));
+      setReportProgress('Checking indexed game evidence...');
+      setEarlyStatistics([]);
+      const timer = setTimeout(() => request.abort(), 85000);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/predict-strategy/stream`, {
+          method: 'POST', headers: { ...await getBearerHeaders(getAccessToken), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ opponent_name: opponentName, context, color: reportColor }), signal: request.signal,
+        });
+        await readReportStream(response, (event) => {
+          if (!strategyGate.isCurrent(request) || store.getState().chess.opponentName !== opponentName) return;
+          if (event.type === 'progress') setReportProgress(event.message);
+          if (event.type === 'statistics') setEarlyStatistics(event.statistics);
+          if (event.type === 'complete') {
+            dispatch(setStrategyAnalysis(event.result));
+            setReportProgress(event.result.cached ? 'Loaded cached report.' : 'Report complete.');
+            setEarlyStatistics([]);
+          }
+        });
+      } finally { clearTimeout(timer); }
     } catch (error) {
-      if (strategyGate.isCurrent(request)) dispatch(setError(error.response?.data?.detail || "Failed to generate prediction."));
+      if (strategyGate.isLatest(request)) dispatch(setError(request.signal.aborted ? 'Report deadline exceeded. Retry shortly.' : error.message || "Failed to generate prediction."));
     } finally {
+      if (strategyGate.isLatest(request)) dispatch(setLoading(false));
       strategyGate.finish(request);
     }
   };
@@ -229,7 +225,7 @@ export default function App() {
             <Chessboard
               position={game.fen()}
               onPieceDrop={onDrop}
-              arePiecesDraggable={!movePending}
+              arePiecesDraggable={!movePending && Boolean(selectedPlayer) && !playersLoading && !predictedMove?.game_over}
               boardWidth={500}
               customDarkSquareStyle={{ backgroundColor: '#54715b' }}
               customLightSquareStyle={{ backgroundColor: '#e7e1d1' }}
@@ -240,6 +236,15 @@ export default function App() {
           <div className="board-footer">
             <span>Play a legal move to receive an opponent prediction.</span>
             <code>{fen.split(' ').slice(0, 4).join(' ')}</code>
+          </div>
+          <div className="board-history">
+            <button type="button" className="reader-secondary-button" onClick={() => {
+              moveGate.cancel(); setMovePending(false); setMoveError(''); setAiSuggestion('');
+              dispatch(setFen(new Chess().fen()));
+            }}>Reset game</button>
+            <details><summary>Game history / PGN ({moves.length} plies)</summary>
+              <textarea aria-label="Game PGN" readOnly value={game.pgn()} rows={5} />
+            </details>
           </div>
           {aiSuggestion && (
             <div className="move-suggestion" aria-live="polite">
@@ -273,21 +278,23 @@ export default function App() {
                   <h3>Generate a game plan</h3>
                 </div>
                 <div className="input-group">
-                  <label>Opponent Name</label>
-                  <input 
-                    type="text" 
-                    value={opponentName} 
+                  <label htmlFor="opponent-player">Opponent</label>
+                  <select id="opponent-player" value={selectedPlayer ? opponentName : ''}
+                    disabled={playersLoading || !players.length}
                     onChange={(e) => {
-                      moveGate.cancel();
-                      strategyGate.cancel();
-                      setMovePending(false);
-                      setMoveError('');
-                      setAiSuggestion('');
-                      dispatch(setLoading(false));
-                      dispatch(setOpponentName(e.target.value));
-                    }}
-                    placeholder="e.g., Magnus Carlsen"
-                  />
+                      moveGate.cancel(); strategyGate.cancel();
+                      setMovePending(false); setMoveError(''); setAiSuggestion('');
+                      dispatch(setLoading(false)); dispatch(setOpponentName(e.target.value));
+                      setEarlyStatistics([]); setReportProgress('');
+                    }}>
+                    <option value="" disabled>{playersLoading ? 'Loading players…' : 'Choose an indexed player'}</option>
+                    {players.map((player) => <option key={player.name} value={player.name}>{player.name} · {player.games} games</option>)}
+                  </select>
+                  {selectedPlayer && <small>{selectedPlayer.games} indexed games available.</small>}
+                  {!playersLoading && !players.length && !playersError && <p>No indexed players yet. Ingest a PGN dataset to begin.</p>}
+                  {playersError && <p role="alert">{playersError}</p>}
+                  <button type="button" className="text-button" disabled={playersLoading || movePending}
+                    onClick={() => { setPlayersLoading(true); setPlayersReload((value) => value + 1); }}>Refresh players</button>
                 </div>
                 
                 <div className="input-group">
@@ -300,12 +307,19 @@ export default function App() {
                   />
                 </div>
 
-                <button type="submit" disabled={loading} className="primary-button">
+                <div className="input-group"><label htmlFor="report-color">Opponent color</label>
+                  <select id="report-color" value={reportColor} disabled={loading} onChange={(event) => setReportColor(event.target.value)}>
+                    <option value="any">Both colors</option><option value="white">White</option><option value="black">Black</option>
+                  </select>
+                </div>
+                <button type="submit" disabled={loading || playersLoading || !selectedPlayer} className="primary-button">
                   <span>{loading ? 'Analyzing...' : 'Generate RAG Strategy'}</span>
                   {!loading && <span aria-hidden="true">→</span>}
                 </button>
               </form>
 
+              {loading && <p role="status" aria-live="polite">{reportProgress}</p>}
+              {earlyStatistics.length > 0 && <Statistics statistics={earlyStatistics} />}
               {error && (
                 <div className="error-message" role="alert">
                   <span>!</span><div><strong>Unable to complete the request</strong>{error}</div>
@@ -321,17 +335,39 @@ export default function App() {
                     </div>
                     {predictedMove?.cached && <span className="cache-badge">Cached</span>}
                   </div>
-            {predictedMove && (
-                    <div className="move-result-grid">
-                      <div><span>Suggested move</span><strong>{predictedMove.san_move}</strong></div>
-                      <div><span>Relative preference</span><strong>{Math.round(predictedMove.confidence * 100)}%</strong></div>
-                      <p className="move-source-note">Source: {predictedMove.prediction_source === 'opponent_history' ? 'matching games from this opponent' : 'a basic positional heuristic'}. This percentage ranks available moves; it is not a win probability.</p>
-                      <div className="confidence-track"><i style={{ width: `${Math.round(predictedMove.confidence * 100)}%` }} /></div>
+                  {predictedMove && (
+                    <div className="prediction-comparison">
+                      {predictedMove.game_over ? <p>Game over: {predictedMove.outcome}</p> : <>
+                        <section><h4>Likely opponent response</h4>
+                          <strong>{predictedMove.san_move}</strong>
+                          <p>{predictedMove.matching_games
+                            ? `Played in ${predictedMove.observed_games} of ${predictedMove.matching_games} matching games.`
+                            : 'No matching games. This is a positional estimate.'}</p>
+                          <p>Smoothed move estimate: {Math.round(predictedMove.confidence * 100)}%.
+                            {predictedMove.matching_games > 0 && ` Historical evidence weight: ${Math.round(predictedMove.history_weight * 100)}%.`}</p>
+                          <small>This estimate is not a win probability and has not been calibrated for this player.</small>
+                          <ul>{predictedMove.candidates?.map((candidate) => <li key={candidate.uci}>
+                            {candidate.san} · {(candidate.probability * 100).toFixed(1)}% · {candidate.observed_games} observed games
+                          </li>)}</ul>
+                        </section>
+                        <section><h4>Strongest engine move</h4>
+                          {predictedMove.engine?.status === 'available' ? <>
+                            <strong>{predictedMove.engine.best.san}</strong>
+                            <p>{formatEvaluation(predictedMove.engine.best)}</p>
+                            <p>After the predicted response: {formatEvaluation(predictedMove.engine.predicted_move)}</p>
+                            <ul>{predictedMove.engine.alternatives.map((line) => <li key={line.uci}>{line.san} · {formatEvaluation(line)}</li>)}</ul>
+                            <small>{predictedMove.engine.name} · evaluations from White’s perspective · bounded search</small>
+                          </> : <p>{predictedMove.engine?.status === 'busy' ? 'Engine is busy. Try the next position shortly.' : 'Engine evaluation is unavailable. The opponent estimate remains available.'}</p>}
+                        </section>
+                      </>}
+                      {predictedMove.draw_claim_available && <p>A draw can be claimed from this position.</p>}
                     </div>
                   )}
                   {strategyAnalysis && (
                     <div className="strategy-result strategy-report">
-                      <p>Based on {supportingGames} supporting games from {availableGames} indexed games for this opponent.</p>
+                      <p>Opponent color: {strategyAnalysis.color}. {strategyAnalysis.context && `Context: ${strategyAnalysis.context}`}</p>
+                      <p>Based on {supportingGames} supporting games from {availableGames} indexed games for this opponent. {strategyAnalysis.cached && "Cached report."}</p>
+                      <Statistics statistics={strategyAnalysis.statistics} />
                       <div className="report-topline">
                         <span className="result-label">Strategic analysis</span>
                         <span className="report-count">{strategyTabs.length} sections</span>
@@ -363,9 +399,15 @@ export default function App() {
                             <div className="report-section-number">{String(strategyTabs.indexOf(visibleReportTab) + 1).padStart(2, '0')}</div>
                             <div><span>{visibleReportTab.kicker}</span><h4>{visibleReportTab.label}</h4></div>
                           </div>
-                          <ReportContent content={visibleReportTab.content} />
+                          <ReportContent content={visibleReportTab.content} sources={strategyAnalysis.sources} />
                         </section>
                       )}
+                      <h4>Evidence limitations</h4><ul>{strategyAnalysis.report.limitations.map((text, index) => <li key={index}>{text}</li>)}</ul>
+                      <h4>Supporting games</h4>{strategyAnalysis.sources.map((source, index) => <details key={source.id} id={`game-${source.id}`}>
+                        <summary>Game {index + 1}: {source.white} vs {source.black} ? {source.result} ? {source.date}</summary>
+                        <p>{source.event} ? ECO: {source.eco} ? Time control: {source.timecontrol}</p>
+                        <pre className="report-diagram">{source.pgn}</pre><small>Reference: {source.id}</small>
+                      </details>)}
                     </div>
                   )}
                 </div>

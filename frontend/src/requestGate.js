@@ -8,6 +8,7 @@ export function createRequestGate() {
       return current;
     },
     isCurrent(request) { return current === request && !request.signal.aborted; },
+    isLatest(request) { return current === request; },
     busy() { return current !== null; },
     finish(request) { if (current === request) current = null; },
     cancel() { current?.abort(); current = null; },

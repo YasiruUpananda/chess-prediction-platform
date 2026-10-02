@@ -19,11 +19,13 @@ test('superseded and cancelled requests cannot apply results', () => {
 
 test('prediction applies atomically only to its original position and opponent', () => {
   const initial = reducer(undefined, { type: 'init' });
-  const action = applyMovePrediction({ expectedFen: initial.fen, opponent: initial.opponentName,
+  const action = applyMovePrediction({ expectedFen: initial.fen, expectedRevision: initial.revision, opponent: initial.opponentName,
     nextFen: 'next-position', response: { san_move: 'e5' } });
   assert.equal(reducer(initial, action).fen, 'next-position');
   const moved = reducer(initial, setFen('new-position'));
   assert.deepEqual(reducer(moved, action), moved);
   const changed = reducer(initial, setOpponentName('Another opponent'));
   assert.deepEqual(reducer(changed, action), changed);
+  const reset = reducer(initial, setFen(initial.fen));
+  assert.deepEqual(reducer(reset, action), reset);
 });
