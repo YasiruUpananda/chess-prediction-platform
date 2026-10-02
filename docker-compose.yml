@@ -1,59 +1,92 @@
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: chess_db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: chessrag
+      POSTGRES_USER: ${POSTGRES_USER:-chess}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-chessrag}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chess} -d ${POSTGRES_DB:-chessrag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
-    image: redis:alpine
-    container_name: chess_redis
-    ports:
-      - "6379:6379"
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
-    container_name: chess_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: neuro_chess
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
     ports:
-      - "5672:5672"
-      - "15672:15672" # Management UI dashboard
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_UI_PORT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   ml-engine:
     build: ./services/ml-engine
-    container_name: ml-engine
     ports:
-      - "8000:8000"
+      - "${ML_ENGINE_PORT:-8000}:8000"
     environment:
-      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/chessrag
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}g
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_MODEL: ${GOOGLE_MODEL:-gemini-3.8-flash}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      PGN_DATA_DIR: /app/data
+      MAX_PDF_BYTES: ${MAX_PDF_BYTES:-26214400}
+      ASGARDEO_ISSUER: ${ASGARDEO_ISSUER:?Set ASGARDEO_ISSUER in .env}
+      ASGARDEO_JWKS_URL: ${ASGARDEO_JWKS_URL:?Set ASGARDEO_JWKS_URL in .env}
+      ASGARDEO_AUDIENCE: ${ASGARDEO_AUDIENCE:?Set ASGARDEO_AUDIENCE in .env}
+    volumes:
+      - ./services/ml-engine/data:/app/data:ro
     depends_on:
-      - db
-      - redis
-      - rabbitmq
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   ml-worker:
     build: ./services/ml-engine
-    container_name: ml-worker
     command: python worker.py
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/chessrag
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      PGN_DATA_DIR: /app/data
     volumes:
-      - ./services/ml-engine/data:/app/data
+      - ./services/ml-engine/data:/app/data:ro
     depends_on:
-      - rabbitmq
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   pgdata:
