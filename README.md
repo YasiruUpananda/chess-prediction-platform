@@ -89,3 +89,6 @@ docker compose run --rm -e RUN_INTEGRATION_TESTS=1 backend-tests
 - `INGEST_REQUIRED_SCOPE` defaults to `chess:ingest`; `INGEST_REQUIRED_ROLE` and `INGEST_ROLE_CLAIM` optionally allow an administrator role in the validated JWT. Configure and grant the permission in Asgardeo; a frontend role label does not authorize ingestion.
 - `DB_POOL_MAX` and `VECTOR_DB_POOL_MAX` bound connections per API process. Workers use smaller pools.
 - `RATE_REPORTS_PER_MINUTE`, `RATE_OCR_PER_MINUTE`, `RATE_MOVES_PER_MINUTE`, and `RATE_INGESTION_PER_MINUTE` configure shared per-user admission limits.
+
+See [Technology adoption](TECHNOLOGY_ADOPTION.md) for local OpenTelemetry/Jaeger,
+generated TypeScript API contracts, React Compiler profiling and optional HNSW retrieval.
