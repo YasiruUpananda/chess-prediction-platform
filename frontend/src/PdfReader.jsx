@@ -300,15 +300,19 @@ export default function PdfReader() {
             <div className="reader-panel-heading"><div><span className="eyebrow">Page analysis</span><h2>Moves on this page</h2></div><span className="reader-page-count">{isExtracting ? 'Reading…' : pageMoves.length}</span></div>
             <p className="reader-empty-state">Text extraction stays in your browser. OCR sends only the selected page image.</p>
             {lines.length > 0 && <label className="reader-field">Choose main line or variation<select value={selectedLine} onChange={(event) => selectLine(Number(event.target.value))}>
-              {lines.map((line, index) => <option key={index} value={index}>Column {line.column} ? {line.variation ? 'Variation' : 'Main line'} {index + 1} ? {line.moves.length}/{line.candidates} legal moves</option>)}
+              {lines.map((line, index) => <option key={index} value={index}>Column {line.column} · {line.variation ? 'Variation' : 'Main line'} {index + 1} · {line.moves.length}/{line.candidates} validated plies</option>)}
             </select></label>}
-            {extractionInfo && <p className="reader-status">{extractionInfo.source}{extractionInfo.cached ? ' ? cached' : ''} ? Line validation: {extractionInfo.confidence}.
+            {extractionInfo && <p className="reader-status">{extractionInfo.source}{extractionInfo.cached ? ' · cached' : ''} · Line validation: {extractionInfo.confidence}.
               {extractionInfo.ocrConfidence != null && ` OCR word confidence: ${Math.round(extractionInfo.ocrConfidence)}%.`}
-              {' '}These are extraction checks, not a probability of correct book analysis. {extractionInfo.issue}</p>}
+              {' '}A ply is one move by White or Black. Legality does not prove the whole printed line was extracted.</p>}
+            {extractionInfo?.issue && <p className="reader-error" role="alert">{extractionInfo.issue}</p>}
+            {extractionInfo && <details><summary>Raw extracted page text</summary>
+              <label className="reader-field">Extracted text before move parsing<textarea readOnly rows={6} value={extractionInfo.blocks.map((block)=>block.text).join('\n\n')} /></label>
+            </details>}
             {pdfFile && <><label className="reader-field">Review and correct moves<textarea rows={5} value={editor} onChange={(event) => setEditor(event.target.value)} maxLength={50000} /></label>
               <div className="reader-board-actions"><button className="reader-secondary-button" onClick={correctLine} disabled={isExtracting}>Validate corrections</button>
                 <button className="reader-secondary-button" onClick={() => { setForceOCR(true); setExtractionAttempt((attempt) => attempt + 1); }} disabled={isExtracting}>Try page OCR</button></div></>}
-            {pageMoves.length > 0 && <button className="reader-secondary-button reader-replay-button" type="button" onClick={handleReplayMoves}>Load reviewed line</button>}
+            {pageMoves.length > 0 && <button className="reader-secondary-button reader-replay-button" type="button" onClick={handleReplayMoves}>{extractionInfo?.issue?'Load validated prefix':'Load reviewed line'}</button>}
             {!pdfFile ? <p className="reader-empty-state">Open a PDF to find chess moves on each page.</p> : pageMoves.length ? (
               <div className="reader-move-list">{pageMoves.map((move, index) => <button className="reader-move-chip" type="button" key={`${move}-${index}`} onClick={() => handlePlayMove(move)}>{move}</button>)}</div>
             ) : <p className="reader-empty-state">{isExtracting ? 'Checking the page text and scanned image…' : 'No valid move tokens found on this page.'}</p>}
