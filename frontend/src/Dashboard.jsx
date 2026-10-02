@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useSelector, useDispatch } from 'react-redux';
+import { useSelector, useDispatch, useStore } from 'react-redux';
 import {
   setFen,
   setOpponentName,
   setLoading,
   setStrategyAnalysis,
-  setPredictedMove,
+  applyMovePrediction,
   setError,
 } from './store/chessSlice';
 import axios from 'axios';
@@ -14,6 +14,7 @@ import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import { useAuthContext } from "@asgardeo/auth-react";
 import { API_BASE_URL, getBearerHeaders } from './api';
+import { createRequestGate } from './requestGate';
 import './App.css'; 
 
 const reportSections = [
@@ -91,6 +92,16 @@ function ReportContent({ content }) {
 
 export default function App() {
   const dispatch = useDispatch();
+  const store = useStore();
+  const moveGate = useMemo(() => createRequestGate(), []);
+  const strategyGate = useMemo(() => createRequestGate(), []);
+  const [movePending, setMovePending] = useState(false);
+  const [moveError, setMoveError] = useState('');
+  useEffect(() => () => {
+    moveGate.cancel();
+    strategyGate.cancel();
+    dispatch(setLoading(false));
+  }, [moveGate, strategyGate, dispatch]);
   const { state, signIn, signOut, getAccessToken } = useAuthContext();
 
   // --- Read Global State from Redux ---
@@ -114,14 +125,18 @@ export default function App() {
 
   // --- Chessboard Logic ---
   async function fetchMovePrediction(currentFen) {
-    dispatch(setLoading(true));
+    const request = moveGate.begin();
+    const opponent = opponentName;
+    setMovePending(true);
+    setMoveError('');
     try {
       const response = await axios.post(`${API_BASE_URL}/api/v1/predict-move`, {
         fen: currentFen,
         opponent_username: opponentName || "Opponent"
-      }, { headers: await getBearerHeaders(getAccessToken) });
+      }, { headers: await getBearerHeaders(getAccessToken), signal: request.signal, timeout: 15000 });
+      const current = store.getState().chess;
+      if (!moveGate.isCurrent(request) || current.fen !== currentFen || current.opponentName !== opponent) return;
       
-      dispatch(setPredictedMove(response.data));
       const aiMove = response.data.san_move;
       const cacheNote = response.data.cached ? ' (Cached via Redis)' : '';
       const source = response.data.prediction_source === 'opponent_history' ? 'opponent game history' : 'position heuristic';
@@ -131,17 +146,22 @@ export default function App() {
       const nextGame = new Chess(currentFen);
       try {
         nextGame.move(aiMove);
-        dispatch(setFen(nextGame.fen()));
+        dispatch(applyMovePrediction({ expectedFen: currentFen, opponent, response: response.data, nextFen: nextGame.fen() }));
       } catch (error) {
         console.error("Failed to apply AI move:", error);
       }
     } catch (err) {
-      console.error("Move prediction error:", err);
-      dispatch(setError(err.response?.data?.detail || err.message));
+      if (moveGate.isCurrent(request)) setMoveError(err.response?.data?.detail || err.message);
+    } finally {
+      if (moveGate.isCurrent(request)) {
+        moveGate.finish(request);
+        setMovePending(false);
+      }
     }
   }
 
   function onDrop(sourceSquare, targetSquare) {
+    if (moveGate.busy()) return false;
     const gameCopy = new Chess(game.fen());
     let moveResult;
     try {
@@ -164,17 +184,19 @@ export default function App() {
   // --- Form Submission Logic (RAG Strategy) ---
   const handleGeneratePrediction = async (e) => {
     e.preventDefault();
+    const request = strategyGate.begin();
     dispatch(setLoading(true));
     
     try {
       const response = await axios.post(`${API_BASE_URL}/api/v1/predict-strategy`, {
         opponent_name: opponentName || "Magnus Carlsen",
         context: context
-      }, { headers: await getBearerHeaders(getAccessToken) });
-      dispatch(setStrategyAnalysis(response.data));
+      }, { headers: await getBearerHeaders(getAccessToken), signal: request.signal, timeout: 90000 });
+      if (strategyGate.isCurrent(request)) dispatch(setStrategyAnalysis(response.data));
     } catch (error) {
-      console.error("Prediction Error:", error);
-      dispatch(setError(error.response?.data?.detail || "Failed to generate prediction."));
+      if (strategyGate.isCurrent(request)) dispatch(setError(error.response?.data?.detail || "Failed to generate prediction."));
+    } finally {
+      strategyGate.finish(request);
     }
   };
 
@@ -207,11 +229,14 @@ export default function App() {
             <Chessboard
               position={game.fen()}
               onPieceDrop={onDrop}
+              arePiecesDraggable={!movePending}
               boardWidth={500}
               customDarkSquareStyle={{ backgroundColor: '#54715b' }}
               customLightSquareStyle={{ backgroundColor: '#e7e1d1' }}
             />
           </div>
+          {movePending && <p role="status">Waiting for the predicted reply…</p>}
+          {moveError && <p role="alert">{moveError}</p>}
           <div className="board-footer">
             <span>Play a legal move to receive an opponent prediction.</span>
             <code>{fen.split(' ').slice(0, 4).join(' ')}</code>
@@ -252,7 +277,15 @@ export default function App() {
                   <input 
                     type="text" 
                     value={opponentName} 
-                    onChange={(e) => dispatch(setOpponentName(e.target.value))} 
+                    onChange={(e) => {
+                      moveGate.cancel();
+                      strategyGate.cancel();
+                      setMovePending(false);
+                      setMoveError('');
+                      setAiSuggestion('');
+                      dispatch(setLoading(false));
+                      dispatch(setOpponentName(e.target.value));
+                    }}
                     placeholder="e.g., Magnus Carlsen"
                   />
                 </div>

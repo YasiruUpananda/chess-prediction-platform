@@ -20,6 +20,10 @@ export const chessSlice = createSlice({
     },
     setOpponentName: (state, action) => {
       state.opponentName = action.payload;
+      state.strategyAnalysis = '';
+      state.supportingGames = 0;
+      state.availableGames = 0;
+      state.predictedMove = null;
     },
     setLoading: (state, action) => {
       state.loading = action.payload;
@@ -33,8 +37,12 @@ export const chessSlice = createSlice({
     },
     setPredictedMove: (state, action) => {
       state.predictedMove = action.payload;
-      state.loading = false;
-      state.error = null;
+    },
+    applyMovePrediction: (state, action) => {
+      const { expectedFen, opponent, response, nextFen } = action.payload;
+      if (state.fen !== expectedFen || state.opponentName !== opponent) return;
+      state.predictedMove = response;
+      state.fen = nextFen;
     },
     setError: (state, action) => {
       state.error = action.payload;
@@ -49,6 +57,7 @@ export const {
   setLoading,
   setStrategyAnalysis,
   setPredictedMove,
+  applyMovePrediction,
   setError,
 } = chessSlice.actions;
 
