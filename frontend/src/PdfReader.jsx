@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ResponsiveBoard from './ResponsiveBoard';
 import SavedStudies from './SavedStudies';
 import { Chess } from 'chess.js';
@@ -16,6 +16,8 @@ export default function PdfReader() {
   const [pdfDocument, setPdfDocument] = useState(null);
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
+  const [pageInput, setPageInput] = useState(null);
+  const [pageError, setPageError] = useState('');
   const [pageWidth, setPageWidth] = useState(680);
   const documentPanel = useRef(null);
   const [pdfError, setPdfError] = useState('');
@@ -169,16 +171,26 @@ export default function PdfReader() {
     setPageNumber(1);
     setNumPages(0);
     setPdfFile(file);
+    setPageInput('1');setPageError('');
     setPieceMappings({}); setMappingDraft({});
     setTimeline([]);setCursor(0);setBookTree(null);setBranchChoices([]);
   }
 
-  function onDocumentLoadSuccess(document) {
+  const onDocumentLoadSuccess = useCallback((document) => {
     const { numPages: loadedPages } = document;
     setPdfDocument(document);
     setNumPages(loadedPages);
-    setPageNumber(1);
+    setPageNumber((current)=>Math.min(Math.max(1,current),loadedPages));
     setPdfError('');
+  }, []);
+  function jumpToPage(event) {
+    event.preventDefault();
+    const input=String(pageInput ?? pageNumber), target=Number(input);
+    if(!input.trim() || !Number.isInteger(target) || target<1 || target>numPages){setPageError(`Enter a page number from 1 to ${numPages}.`);return;}
+    navigatePage(target);
+  }
+  function navigatePage(target) {
+    setPageInput(null);setPageError('');setForceOCR(false);setPageNumber(target);
   }
 
   function commitMove(move) {
@@ -292,11 +304,17 @@ export default function PdfReader() {
           ) : (
             <>
               <div className="pdf-toolbar">
-                <button className="reader-secondary-button" type="button" onClick={() => { setForceOCR(false); setPageNumber((page) => Math.max(1, page - 1)); }} disabled={pageNumber <= 1}>← Previous</button>
+                <button className="reader-secondary-button" type="button" onClick={() => navigatePage(Math.max(1, pageNumber - 1))} disabled={pageNumber <= 1}>← Previous</button>
                 <span>Page <b>{pageNumber}</b> of <b>{numPages || '…'}</b></span>
-                <button className="reader-secondary-button" type="button" onClick={() => { setForceOCR(false); setPageNumber((page) => Math.min(numPages, page + 1)); }} disabled={!numPages || pageNumber >= numPages}>Next →</button>
+                <form className="reader-page-jump" onSubmit={jumpToPage} noValidate>
+                  <label htmlFor="reader-page-number">Go to page</label>
+                  <input id="reader-page-number" type="number" inputMode="numeric" min="1" max={numPages || 1} step="1" value={pageInput ?? String(pageNumber)} onChange={(event)=>setPageInput(event.target.value)} aria-invalid={Boolean(pageError)} aria-describedby={pageError?'reader-page-error':undefined} />
+                  <button className="reader-secondary-button" type="submit" disabled={!numPages}>Go</button>
+                </form>
+                <button className="reader-secondary-button" type="button" onClick={() => navigatePage(Math.min(numPages, pageNumber + 1))} disabled={!numPages || pageNumber >= numPages}>Next →</button>
               </div>
               <div className="pdf-page-stage">
+                {pageError && <p id="reader-page-error" className="reader-error" role="alert">{pageError}</p>}
                 <Suspense fallback={<div className="reader-placeholder">Loading PDF viewer...</div>}>
                   <PdfDocumentView file={pdfFile} onLoadSuccess={onDocumentLoadSuccess}
                     onLoadError={(error) => setPdfError(`This PDF could not be opened: ${error.message}`)}

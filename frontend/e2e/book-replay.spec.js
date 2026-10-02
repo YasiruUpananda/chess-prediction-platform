@@ -1,6 +1,41 @@
 import { test, expect } from '@playwright/test';
 import { Buffer } from 'node:buffer';
 
+function fivePageFixture() {
+  const text='BT /F1 14 Tf 10 160 Td (1.e4 e5 2.Nf3 Nc6) Tj ET';
+  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R 6 0 R 7 0 R] /Count 5 >>',
+    ...Array.from({length:5},()=> '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 8 0 R >> >> /Contents 9 0 R >>'),
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${text.length} >>\nstream\n${text}\nendstream`];
+  let pdf='%PDF-1.4\n';const offsets=[];
+  objects.forEach((object,index)=>{offsets.push(pdf.length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});
+  const xref=pdf.length;
+  return Buffer.from(pdf+`xref\n0 10\n0000000000 65535 f \n${offsets.map(offset=>String(offset).padStart(10,'0')+' 00000 n ').join('\n')}\ntrailer\n<< /Size 10 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+}
+
+test('PDF page navigation stays on the selected page and supports direct jumps',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  await page.goto('/reader');
+  await page.getByLabel('Choose a PDF to read').setInputFiles({name:'five-pages.pdf',mimeType:'application/pdf',buffer:fivePageFixture()});
+  const toolbar=page.locator('.pdf-toolbar');
+  await expect(toolbar).toContainText('Page 1 of 5');
+  await toolbar.getByRole('button',{name:'Next'}).click();
+  await expect(toolbar).toContainText('Page 2 of 5');
+  await expect(page.locator('.react-pdf__Page')).toHaveAttribute('data-page-number','2');
+  await toolbar.getByRole('button',{name:'Next'}).click();
+  await expect(page.locator('.react-pdf__Page')).toHaveAttribute('data-page-number','3');
+  await page.getByLabel('Go to page').fill('5');
+  await page.getByLabel('Go to page').press('Enter');
+  await expect(page.locator('.react-pdf__Page')).toHaveAttribute('data-page-number','5');
+  await expect(toolbar.getByRole('button',{name:'Next'})).toBeDisabled();
+  await toolbar.getByRole('button',{name:'Previous'}).click();
+  await expect(page.locator('.react-pdf__Page')).toHaveAttribute('data-page-number','4');
+  await page.getByLabel('Go to page').fill('6');
+  await toolbar.getByRole('button',{name:'Go',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Enter a page number from 1 to 5.');
+  await expect(toolbar).toContainText('Page 4 of 5');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy();
+});
+
 function pdfFixture(moves='1.e4 e5 2.Nf3 Nc6') {
   const text=`BT /F1 14 Tf 10 160 Td (${moves}) Tj ET`;
   const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${text.length} >>\nstream\n${text}\nendstream`];
