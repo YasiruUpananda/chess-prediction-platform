@@ -2,6 +2,7 @@
 import json
 import os
 import pika
+from telemetry import carrier
 
 QUEUE = "pgn_ingestion_v2"
 RETRY_QUEUE = QUEUE + ".retry"
@@ -30,10 +31,10 @@ def setup(channel):
     channel.confirm_delivery()
 
 
-def publish(channel, queue, body, attempts=0):
+def publish(channel, queue, body, attempts=0, trace_headers=None):
     channel.basic_publish(exchange="", routing_key=queue, body=body, mandatory=True,
                           properties=pika.BasicProperties(delivery_mode=2,
-                              content_type="application/json", headers={"attempts": attempts}))
+                              content_type="application/json", headers={**(trace_headers or carrier()), "attempts": attempts}))
 
 
 def enqueue(filename):
@@ -43,10 +44,10 @@ def enqueue(filename):
         publish(channel, QUEUE, json.dumps({"filename": filename}).encode())
 
 
-def finish(channel, delivery_tag, body, attempts, error):
+def finish(channel, delivery_tag, body, attempts, error, trace_headers=None):
     if error is not None:
         permanent = isinstance(error, (ValueError, FileNotFoundError))
         destination = DEAD_QUEUE if permanent or attempts + 1 >= MAX_ATTEMPTS else RETRY_QUEUE
         # Only acknowledge after the replacement has been confirmed.
-        publish(channel, destination, body, attempts + 1)
+        publish(channel, destination, body, attempts + 1, trace_headers)
     channel.basic_ack(delivery_tag=delivery_tag)

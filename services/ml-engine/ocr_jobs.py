@@ -3,6 +3,8 @@ import os
 from uuid import uuid4
 
 from database import connect
+from telemetry import carrier
+from psycopg.types.json import Jsonb
 
 
 class QueueFull(Exception):
@@ -23,8 +25,8 @@ def submit(owner, page, content, cache_key=None):
             FROM ocr_jobs WHERE status IN ('queued','running')""", (owner,)).fetchone()
         if total >= int(os.getenv("OCR_QUEUE_LIMIT", "8")) or own >= 2:
             raise QueueFull("OCR is busy. Wait for your current pages to finish, then retry.")
-        db.execute("INSERT INTO ocr_jobs(id,owner,page,pdf,cache_key) VALUES (%s,%s,%s,%s,%s)",
-                   (job_id, owner, page, content, cache_key))
+        db.execute("INSERT INTO ocr_jobs(id,owner,page,pdf,cache_key,trace_context) VALUES (%s,%s,%s,%s,%s,%s)",
+                   (job_id, owner, page, content, cache_key, Jsonb(carrier())))
     return {"job_id": str(job_id), "status": "queued"}
 
 
@@ -65,7 +67,7 @@ def claim():
         db.execute("DELETE FROM ocr_jobs WHERE finished_at < now() - interval '1 hour'")
         return db.execute("""UPDATE ocr_jobs SET status='running', started_at=now()
             WHERE id=(SELECT id FROM ocr_jobs WHERE status='queued' ORDER BY created_at
-                      FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,page,pdf""").fetchone()
+                      FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,page,pdf,trace_context""").fetchone()
 
 
 def finish(job_id, result=None, error=None):

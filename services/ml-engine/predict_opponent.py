@@ -1,4 +1,5 @@
-﻿"""Player-scoped evidence and schema-validated strategy reports."""
+from telemetry import traced
+"""Player-scoped evidence and schema-validated strategy reports."""
 import asyncio
 import hashlib
 import io
@@ -40,6 +41,7 @@ class StrategyReport(BaseModel):
     recommendations: list[Claim] = Field(max_length=4)
     limitations: list[str] = Field(min_length=1, max_length=6)
 
+@traced('evidence_count')
 def evidence_count(player):
     with connect() as db:
         if db.execute("SELECT to_regclass('public.langchain_pg_embedding')").fetchone()[0] is None:
@@ -50,6 +52,7 @@ def evidence_count(player):
             WHERE g.indexed AND c.name=%s AND (lower(trim(g.white))=%s OR lower(trim(g.black))=%s)''',
             (COLLECTION_NAME, player, player)).fetchone()[0]
 
+@traced('factual_statistics')
 def factual_statistics(player, color='any'):
     with connect() as db:
         ids = [r[0] for r in db.execute('''SELECT DISTINCT g.id FROM ingested_games g
@@ -109,6 +112,7 @@ class GeminiReportClient:
         self.client = httpx.Client(timeout=httpx.Timeout(45, connect=5, pool=5),
                                    limits=httpx.Limits(max_connections=2, max_keepalive_connections=2))
 
+    @traced('gemini.generate')
     def invoke(self, prompt):
         # Native REST avoids the installed LangChain adapter's ignored schema
         # method and implicit retry policy. Keys are sent only in headers.

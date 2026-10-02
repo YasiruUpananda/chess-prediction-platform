@@ -1,3 +1,4 @@
+from telemetry import traced
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("neuro_chess.ocr")
 
 
+@traced('run_extract')
 def run_extract(page, content):
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "page.pdf"
@@ -42,6 +44,8 @@ def run_extract(page, content):
 
 
 def main():
+    from telemetry import configure
+    configure('neuro-chess-ocr_worker')
     delay = 1
     while True:
         try:
@@ -53,9 +57,10 @@ def main():
                 if job is None:
                     time.sleep(1)
                     continue
-                job_id, page, content = job
+                job_id, page, content, trace_context = job
                 try:
-                    result = run_extract(page, bytes(content))
+                    from telemetry import continued
+                    result = continued(trace_context, run_extract, page, bytes(content))
                 except Exception as exc:
                     logger.warning("OCR job %s failed (%s)", job_id, type(exc).__name__)
                     ocr_jobs.finish(job_id, error=str(exc) if isinstance(exc, (ValueError, TimeoutError)) else "OCR processing failed")

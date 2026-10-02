@@ -1,4 +1,5 @@
-﻿import hashlib
+from telemetry import traced
+import hashlib
 import json
 import logging
 import os
@@ -36,6 +37,7 @@ def game_identity(game):
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+@traced('process_pgn')
 def process_pgn(filename):
     from langchain_core.documents import Document
     from rag_store import get_vector_store
@@ -92,6 +94,8 @@ def decode_task(body):
 
 
 def main():
+    from telemetry import configure
+    configure('neuro-chess-worker')
     delay = 1
     with ThreadPoolExecutor(max_workers=1) as pool:
         while True:
@@ -115,7 +119,8 @@ def main():
                             continue
                         error = None
                         try:
-                            future = pool.submit(process_pgn, decode_task(body))
+                            from telemetry import continued
+                            future = pool.submit(continued, properties.headers, process_pgn, decode_task(body))
                             while not future.done():
                                 conn.process_data_events(time_limit=1)
                                 heartbeat('ingestion', HEALTH_FILE)
@@ -124,7 +129,7 @@ def main():
                             logger.exception("Ingestion job failed")
                             error = exc
                         attempts = int((properties.headers or {}).get("attempts", 0))
-                        finish(channel, method.delivery_tag, body, attempts, error)
+                        finish(channel, method.delivery_tag, body, attempts, error, properties.headers)
             except Exception as exc:
                 HEALTH_FILE.unlink(missing_ok=True)
                 logger.warning("Worker disconnected (%s); retrying in %ss", type(exc).__name__, delay)

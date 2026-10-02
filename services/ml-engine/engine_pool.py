@@ -10,6 +10,7 @@ from collections import OrderedDict
 
 import chess
 import chess.engine
+from telemetry import traced
 
 
 def engine_cache_key(board, predicted_move, seconds, nodes):
@@ -35,6 +36,7 @@ class EnginePool:
         self.seconds = min(max(float(os.getenv("STOCKFISH_TIME_SECONDS", "0.25")), 0.05), 2)
         self.nodes = min(max(int(os.getenv("STOCKFISH_NODES", "100000")), 1000), 1000000)
 
+    @traced('stockfish.analyse')
     def analyse(self, board, predicted_move):
         key = engine_cache_key(board, predicted_move, self.seconds, self.nodes)
         with self.lock:

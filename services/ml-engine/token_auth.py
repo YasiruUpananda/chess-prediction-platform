@@ -1,3 +1,4 @@
+from telemetry import traced
 """Asgardeo JWT access-token validation for the FastAPI resource server."""
 
 import os
@@ -25,6 +26,7 @@ def get_jwks_client() -> PyJWKClient:
     return PyJWKClient(jwks_url, cache_keys=True, timeout=5)
 
 
+@traced('require_asgardeo_user')
 def require_asgardeo_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
 ) -> dict[str, Any]:

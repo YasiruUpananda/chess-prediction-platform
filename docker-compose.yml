@@ -1,4 +1,12 @@
 services:
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.21.0
+    profiles: [observability]
+    restart: unless-stopped
+    mem_limit: 512m
+    ports:
+      - "127.0.0.1:16686:16686"
+
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -62,6 +70,9 @@ services:
       RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_MODEL: ${GOOGLE_MODEL:-gemini-3.8-flash}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACES_SAMPLE_RATIO: ${OTEL_TRACES_SAMPLE_RATIO:-0.25}
+      VECTOR_SEARCH_MODE: ${VECTOR_SEARCH_MODE:-exact}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       PGN_DATA_DIR: /app/data
       MAX_PDF_BYTES: ${MAX_PDF_BYTES:-26214400}
@@ -109,6 +120,8 @@ services:
       WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
       RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       PGN_DATA_DIR: /app/data
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACES_SAMPLE_RATIO: ${OTEL_TRACES_SAMPLE_RATIO:-0.25}
       DB_POOL_MAX: 2
       VECTOR_DB_POOL_MAX: 2
       OMP_NUM_THREADS: 1
@@ -139,6 +152,8 @@ services:
       WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
       OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-45}
       OCR_MAX_PIXELS: ${OCR_MAX_PIXELS:-16000000}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACES_SAMPLE_RATIO: ${OTEL_TRACES_SAMPLE_RATIO:-0.25}
       DB_POOL_MAX: 2
     depends_on:
       db:

@@ -51,6 +51,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from telemetry import configure
+configure('neuro-chess-api')
+if os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT'):
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    FastAPIInstrumentor.instrument_app(app, excluded_urls='health,ready')
+
 # --- CORS Middleware ---
 # Allows your React frontend to interact with this API without browser blocks
 app.add_middleware(

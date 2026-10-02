@@ -2,6 +2,8 @@
 import os
 import atexit
 import threading
+from contextlib import contextmanager
+from opentelemetry import trace
 from psycopg_pool import ConnectionPool
 
 _pool = None
@@ -21,8 +23,17 @@ def get_pool():
     return _pool
 
 
+@contextmanager
 def connect():
-    return get_pool().connection()
+    with trace.get_tracer('neuro-chess').start_as_current_span('db.transaction', record_exception=False,
+            set_status_on_exception=False) as span:
+        try:
+            with get_pool().connection() as connection:
+                yield connection
+        except Exception as error:
+            span.set_attribute('error.type', type(error).__name__)
+            span.set_status(trace.Status(trace.StatusCode.ERROR))
+            raise
 
 
 def close_pool():
@@ -73,6 +84,7 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_ocr_status ON ocr_jobs(status, created_at);
             ALTER TABLE ocr_jobs ADD COLUMN IF NOT EXISTS cache_key TEXT;
+            ALTER TABLE ocr_jobs ADD COLUMN IF NOT EXISTS trace_context JSONB;
             CREATE INDEX IF NOT EXISTS idx_ocr_owner_cache ON ocr_jobs(owner,cache_key);
             CREATE TABLE IF NOT EXISTS dataset_version (
                 id INTEGER PRIMARY KEY CHECK (id=1), version BIGINT NOT NULL DEFAULT 0
