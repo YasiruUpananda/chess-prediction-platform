@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.checked-js.json",
+  "compilerOptions": {"strictNullChecks": true},
+  "include": ["src/chessPdf.js"]
+}

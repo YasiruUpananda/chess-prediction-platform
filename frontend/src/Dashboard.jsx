@@ -1,3 +1,4 @@
+import EvidenceReferences from './EvidenceReferences';
 import { useEffect, useMemo, useState } from 'react';
 import { useSelector, useDispatch, useStore } from 'react-redux';
 import {
@@ -34,18 +35,18 @@ const reportSections = [
   { id: 'recommendations', label: 'Recommendations', kicker: 'Preparation ideas' },
 ];
 
-function Statistics({ statistics }) {
+function Statistics({ statistics, evidence = null }) {
   return <details className="report-statistics" open><summary>Verified game statistics</summary>
     <ul>{statistics.map((stat) => <li key={stat.id} id={`stat-${stat.id}`}>
       {statisticText(stat)}
-      <details><summary>Source game references</summary>{stat.game_ids?.map((id) => <code key={id}>{id}<br /></code>)}</details>
+      <details><summary>Source game references</summary>{stat.game_ids?.map((id) => <code key={id}>{id}<br /></code>)}{evidence && <EvidenceReferences key={evidence.data_version+stat.id} player={evidence.opponent} color={evidence.color || 'any'} version={evidence.data_version} statistic={stat} />}</details>
     </li>)}</ul>
   </details>;
 }
 
 export default function Dashboard() {
   const dispatch = useDispatch();
-  const store = useStore();
+  const store = /** @type {typeof import('./store/store').store} */ (useStore());
   const moveGate = useMemo(() => createRequestGate(), []);
   const strategyGate = useMemo(() => createRequestGate(), []);
   const [movePending, setMovePending] = useState(false);
@@ -62,7 +63,7 @@ export default function Dashboard() {
 
   // --- Read Global State from Redux ---
   const { fen, opponentName, strategyAnalysis, predictedMove, loading, error, supportingGames, availableGames, initialFen, moves } = useSelector(
-    (state) => state.chess
+    (/** @type {ReturnType<typeof import('./store/store').store.getState>} */ state) => state.chess
   );
 
   // --- Local Game & Form States ---
@@ -70,7 +71,7 @@ export default function Dashboard() {
   const playersQuery = useGetPlayersQuery(state.username || 'session', { refetchOnMountOrArgChange: 60 });
   const players = playersQuery.data || EMPTY_PLAYERS;
   const playersLoading = playersQuery.isFetching;
-  const playersError = playersQuery.error?.error || '';
+  const playersError = (playersQuery.error && 'error' in playersQuery.error ? playersQuery.error.error : (playersQuery.error && 'message' in playersQuery.error ? playersQuery.error.message : '')) || '';
   useEffect(() => {
     if (!playersQuery.data) return;
     const selected = store.getState().chess.opponentName;
@@ -81,7 +82,7 @@ export default function Dashboard() {
   const [context, setContext] = useState('');
   const [moveInput, setMoveInput] = useState('');
   const [promotion, setPromotion] = useState('q');
-  const [orientation, setOrientation] = useState('white');
+  const [orientation, setOrientation] = useState(/** @type {'white'|'black'} */ ('white'));
   const [aiSuggestion, setAiSuggestion] = useState('');
   const [activeReportTab, setActiveReportTab] = useState('profile');
   const strategyTabs = strategyAnalysis?.report ? reportSections.map((section) => ({ ...section, content: strategyAnalysis.report[section.id] })) : [];
@@ -362,7 +363,7 @@ export default function Dashboard() {
                       <button type="button" className="reader-secondary-button" onClick={()=>downloadText(reportMarkdown(strategyAnalysis),'opponent-report.md','text/markdown')}>Export report</button>
                       <p>Opponent color: {strategyAnalysis.color}. {strategyAnalysis.context && `Context: ${strategyAnalysis.context}`}</p>
                       <p>Based on {supportingGames} supporting games from {availableGames} indexed games for this opponent. {strategyAnalysis.cached && "Cached report."}</p>
-                      <Statistics statistics={strategyAnalysis.statistics} />
+                      <Statistics evidence={strategyAnalysis} statistics={strategyAnalysis.statistics} />
                       <div className="report-topline">
                         <span className="result-label">Strategic analysis</span>
                         <span className="report-count">{strategyTabs.length} sections</span>

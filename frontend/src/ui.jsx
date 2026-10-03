@@ -1,3 +1,4 @@
+/** @param {import('react').ButtonHTMLAttributes<HTMLButtonElement> & {variant?:string}} props */
 export function Button({variant='secondary',className='',type='button',...props}) {
   return <button type={type} className={`ui-button ui-button--${variant} ${className}`} {...props} />;
 }

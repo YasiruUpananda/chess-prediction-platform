@@ -56,6 +56,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/evidence/references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Evidence References */
+        get: operations["evidence_references_api_v1_evidence_references_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -344,6 +361,28 @@ export interface components {
              * @default 0
              */
             depth: number;
+        };
+        /** EvidenceReference */
+        EvidenceReference: {
+            /** Id */
+            id: string;
+            /** White */
+            white: string;
+            /** Black */
+            black: string;
+        };
+        /** EvidenceReferencePage */
+        EvidenceReferencePage: {
+            /** Games */
+            games: components["schemas"]["EvidenceReference"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+            /** Data Version */
+            data_version: string;
         };
         /** GameStatistic */
         GameStatistic: {
@@ -800,6 +839,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    evidence_references_api_v1_evidence_references_get: {
+        parameters: {
+            query: {
+                player: string;
+                statistic_id: string;
+                version: string;
+                color?: "any" | "white" | "black";
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceReferencePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

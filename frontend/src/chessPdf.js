@@ -1,4 +1,7 @@
-﻿import { Chess } from 'chess.js';
+import { Chess } from 'chess.js';
+/** @typedef {{san:string,number?:number,turn?:string,comments?:string[]}} NotationStep */
+/** @typedef {{rootId:number,steps:NotationStep[],label:string}} WorkingAnchor */
+/** @typedef {{id:number,rootId:number,steps:NotationStep[],variation:boolean,parentSteps:NotationStep[]|null,hasOwnMoves:boolean,anchorOptions?:WorkingAnchor[]}} WorkingLine */
 export const EXTRACTION_VERSION = 'layout-document-v7';
 const SAN = /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)$/;
 const UNKNOWN_GLYPH = /[\uFFFD\uE000-\uF8FF¤]/;
@@ -6,6 +9,7 @@ const unreadableMove = (token) => UNKNOWN_GLYPH.test(token) || (!SAN.test(token)
 
 // A PDF chess font may encode a knight as an arbitrary character. Never map
 // those characters globally: they can also occur in ordinary book prose.
+/** @param {string} text @param {Record<string,string>} mappings */
 export function applyPieceMappings(text, mappings = {}) {
   return Array.from(text).map((glyph, index, chars) => {
     const piece = mappings[glyph];
@@ -38,7 +42,7 @@ export function suggestPieceMappings(raw, initialFen) {
     const pieces = glyph ? (mappings[glyph] ? [mappings[glyph]] : ['K','Q','R','B','N']) : [''];
     for (const piece of pieces) {
       const next = new Chess(board.fen());
-      try { next.move(glyph ? piece + custom[2] : token); }
+      try { next.move(glyph && custom ? piece + custom[2] : token); }
       catch { continue; }
       visit(index + 1, next, glyph ? { ...mappings, [glyph]: piece } : mappings);
     }
@@ -48,6 +52,7 @@ export function suggestPieceMappings(raw, initialFen) {
   return Object.fromEntries(Object.entries(solutions[0]).filter(([glyph,piece]) => solutions.every((solution)=>solution[glyph]===piece)));
 }
 
+/** @param {string} text */
 export function normalizeChessText(text) {
   return text.replace(/[\uFE0E\uFE0F]/g, '').replace(/[♔♚]/g, 'K').replace(/[♕♛]/g, 'Q').replace(/[♖♜]/g, 'R')
     .replace(/[♗♝]/g, 'B').replace(/[♘♞]/g, 'N').replace(/[♙♟]/g, '')
@@ -64,6 +69,7 @@ export function normalizeChessText(text) {
 // Keep positions rather than joining PDF items in arbitrary extraction order.
 // A persistent central gutter identifies two columns; ambiguous layouts are
 // exposed as blocks so readers can select/correct a line instead of merging it.
+/** @param {number|null} page */
 export function textBlocks(items, pageWidth, page = null) {
   const positioned = items.filter((item) => item.str?.trim() && item.transform)
     .map((item) => ({ text: item.str, rawText: item.str, page, fontSize: Math.hypot(item.transform[2], item.transform[3]), fontName: item.fontName || 'unknown', hasEOL: Boolean(item.hasEOL), transform: [...item.transform], x: item.transform[4], y: item.transform[5],
@@ -136,6 +142,7 @@ export function parseTextBlocks(blocks, fen, mappings={}, prefix='') {
       // This is one already-separated column; do not run column detection again.
       text=textBlocks(items,Infinity)[0]?.text || '';
     } else {
+      /** @type {Record<string,string>} */
       const fallback={};
       for(const [key,piece] of Object.entries(mappings)) {const [font,glyph]=JSON.parse(key);if(font==='unknown')fallback[glyph]=piece;}
       text=applyPieceMappings(normalizeChessText(text),fallback);
@@ -152,7 +159,9 @@ export function locateMoves(moves, items, mappings={}) {
   let run=0, offset=0;
   return moves.map(san=>{
     for(let i=run;i<items.length;i++) {
-      const item=items[i], map={};
+      const item=items[i];
+      /** @type {Record<string,string>} */
+      const map={};
       for(const [key,piece] of Object.entries(mappings)) {const [font,glyph]=JSON.parse(key);if(font===item.fontName)map[glyph]=piece;}
       const text=applyPieceMappings(normalizeChessText(item.text),map);
       const index=text.indexOf(san,i===run?offset:0);
@@ -189,9 +198,12 @@ export function regionBlocks(blocks, region) {
 export function extractChessLines(rawText, initialFen = new Chess().fen(), allowUnnumbered = false) {
   const text = normalizeChessText(rawText).replace(/(\d+\.(?:\.\.)?)(?=[KQRBNabcdefghO])/g, '$1 ');
   const tokens = text.match(/\{[^}]*\}|;[^\n]*|\$\d+|\d+\.(?:\.\.)?|[()]|[^\s(){}]+/g) || [];
+  /** @type {WorkingLine[]} */
   const lines = [];
   const stack = [];
+  /** @type {WorkingLine|null} */
   let current = null;
+  /** @type {{number:number,turn:string}|null} */
   let pendingNumber = null;
   let active = allowUnnumbered;
   let unmatchedClosing = false;
@@ -216,6 +228,7 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
     }
     return [...anchors.values()];
   };
+  /** @param {NotationStep[]} prefix @param {boolean} variation @param {WorkingLine|null} parent @returns {WorkingLine} */
   const newLine = (prefix = [], variation = false, parent = null) => {
     const id = lines.length;
     const line = { id, rootId: parent?.rootId ?? id, steps: [...prefix], variation,
@@ -311,6 +324,7 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
   });
 }
 
+/** @param {string} text @param {string} fen @param {boolean} allowUnnumbered @param {Record<string,string>} mappings */
 export function parseChessText(text, fen, allowUnnumbered = false, mappings = {}) {
   // Separate glued numbering without losing SAN tokens.
   return extractChessLines(normalizeChessText(applyPieceMappings(normalizeChessText(text), mappings)).replace(/(\d+\.(?:\.\.)?)(?=[KQRBNabcdefghO])/g, '$1 '), fen, allowUnnumbered);

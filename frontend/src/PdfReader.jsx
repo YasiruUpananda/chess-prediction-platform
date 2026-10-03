@@ -25,7 +25,7 @@ export default function PdfReader() {
   const [isFullscreen,setIsFullscreen]=useState(false);
   const [viewError,setViewError]=useState('');
   const [documentGames,setDocumentGames]=useState([]);
-  const [sessionReady, setSessionReady] = useState(false);
+  const [sessionReady, setSessionReady] = useState(/** @type {false|string} */ (false));
   const [sessionStatus,setSessionStatus]=useState('');
   const [selection,setSelection]=useState(null);
   const [selectRegion,setSelectRegion]=useState(false);
@@ -58,7 +58,7 @@ export default function PdfReader() {
     if(branchChoices.length) branchRegion.current?.querySelector('button')?.focus({preventScroll:true});
   },[branchChoices]);
   const game = useMemo(() => restoreGame(initialFen, timeline.slice(0, cursor)), [initialFen, timeline, cursor]);
-  const [orientation, setOrientation] = useState('white');
+  const [orientation, setOrientation] = useState(/** @type {'white'|'black'} */ ('white'));
   const [promotion, setPromotion] = useState('q');
   const [moveInput, setMoveInput] = useState('');
   const [lines, setLines] = useState([]);
@@ -355,7 +355,7 @@ export default function PdfReader() {
       setPageMoves(corrected[0].moves);
       setExtractionInfo((info) => ({ ...info, confidence: corrected[0].confidence, issue: corrected[0].issue }));
       setMoveStatus(corrected[0].issue || 'Corrections validated. Load the line to replay it.');
-    } catch (error) { setMoveStatus(error.message); }
+    } catch (error) { setMoveStatus(error instanceof Error ? error.message : 'Invalid move text'); }
   }
   function applyFen(fen) {
     try { const board = new Chess(fen); if(board.fen()!==initialFen){setPageMoves([]);setLines([]);} setContinuationPrefix([]);setContinuationNotation(''); setInitialFen(board.fen()); setFenInput(board.fen()); setTimeline([]); setCursor(0); setBookTree(null);setBookOrigins([]); setBranchChoices([]); setMoveStatus('Starting position updated.'); }
@@ -400,7 +400,7 @@ export default function PdfReader() {
     catch {setSessionReady(owner+':'+documentHash);setSessionStatus('Could not remove local progress.');}
   }
   return (
-    <main ref={workspace} className="reader-shell" data-reader-theme={readerTheme} style={{'--reader-split':split+'%'}}>
+    <main ref={workspace} className="reader-shell" data-reader-theme={readerTheme} style={/** @type {import('react').CSSProperties & {'--reader-split':string}} */ ({'--reader-split':split+'%'})}>
 
       <div className="reader-title-row">
         <div><span className="eyebrow">Read. Explore. Play.</span><h1>Interactive book reader</h1>

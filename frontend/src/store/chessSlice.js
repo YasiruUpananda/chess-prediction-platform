@@ -7,7 +7,7 @@ const initialState = {
   pgn: '',
   revision: 0,
   opponentName: '',
-  strategyAnalysis: '',
+  strategyAnalysis: /** @type {import('../apiClient').StrategyResponse|null} */ (null),
   supportingGames: 0,
   availableGames: 0,
   predictedMove: null,
@@ -41,7 +41,7 @@ export const chessSlice = createSlice({
     },
     setOpponentName: (state, action) => {
       state.opponentName = action.payload;
-      state.strategyAnalysis = '';
+      state.strategyAnalysis = null;
       state.supportingGames = 0;
       state.availableGames = 0;
       state.predictedMove = null;
@@ -50,7 +50,7 @@ export const chessSlice = createSlice({
     setLoading: (state, action) => {
       state.loading = action.payload;
       if (action.payload) {
-        state.strategyAnalysis = '';
+        state.strategyAnalysis = null;
         state.supportingGames = 0;
         state.availableGames = 0;
         state.error = null;
@@ -67,7 +67,7 @@ export const chessSlice = createSlice({
       state.predictedMove = action.payload;
     },
     clearStrategy: (state) => {
-      state.strategyAnalysis = '';
+      state.strategyAnalysis = null;
       state.supportingGames = 0;
       state.availableGames = 0;
       state.loading = false;

@@ -128,6 +128,113 @@
         }
       }
     },
+    "/api/v1/evidence/references": {
+      "get": {
+        "summary": "Evidence References",
+        "operationId": "evidence_references_api_v1_evidence_references_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Player"
+            }
+          },
+          {
+            "name": "statistic_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Statistic Id"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Version"
+            }
+          },
+          {
+            "name": "color",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "any",
+                "white",
+                "black"
+              ],
+              "type": "string",
+              "default": "any",
+              "title": "Color"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceReferencePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Health Check",
@@ -726,6 +833,65 @@
           "san"
         ],
         "title": "EngineLine"
+      },
+      "EvidenceReference": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "white": {
+            "type": "string",
+            "title": "White"
+          },
+          "black": {
+            "type": "string",
+            "title": "Black"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "white",
+          "black"
+        ],
+        "title": "EvidenceReference"
+      },
+      "EvidenceReferencePage": {
+        "properties": {
+          "games": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceReference"
+            },
+            "type": "array",
+            "title": "Games"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "data_version": {
+            "type": "string",
+            "title": "Data Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "games",
+          "total",
+          "offset",
+          "limit",
+          "data_version"
+        ],
+        "title": "EvidenceReferencePage"
       },
       "GameStatistic": {
         "properties": {

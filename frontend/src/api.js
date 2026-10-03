@@ -35,11 +35,13 @@ export async function getBearerHeaders(getAccessToken = tokenProvider, signal) {
     if (!token) throw new ApiError('Sign in to use this tool.', 401);
     return { Authorization: `Bearer ${token}` };
   } catch (error) {
-    if (error.name === 'AbortError') throw error;
+    if (error instanceof Error && error.name === 'AbortError') throw error;
     throw new ApiError(friendlyError(new ApiError('Sign in to use this tool.',401)),401);
   }
 }
 
+/** @param {string} path
+ * @param {Omit<RequestInit,'body'> & {body?:unknown,getAccessToken?:()=>Promise<string>,timeout?:number}} options */
 export async function authenticatedRequest(path, options = {}, consume = (response) => response.status === 204 ? null : response.json()) {
   const { getAccessToken, timeout = 15000, signal, body, ...rest } = options;
   const controller = new AbortController();
