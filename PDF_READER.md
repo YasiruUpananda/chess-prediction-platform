@@ -2,6 +2,16 @@
 
 Open a local PDF on `/reader`. Previous/Next and the page-number field navigate directly. Review extracted moves and load the line beneath the board. Left/Right arrow keys replay moves; editable fields keep their normal behavior. Branch points ask which continuation to follow.
 
+## Reading workspace
+
+On desktop, drag the divider between the PDF and board, or focus it and use Left/Right. The PDF scrolls inside its pane while the board stays alongside it. On smaller screens, switch between **Book**, **Board**, and **Notes**; the tabs also support arrow keys, Home, and End. Board controls include Previous/Next move, paired White/Black move columns, a highlighted current move, automatic move-list scrolling, and expandable alternatives.
+
+Choose **Warm paper** for a light reading workspace. Zoom changes the displayed PDF size; **Fit width** restores its container width. **Fullscreen reader** expands the workspace and can be closed with Escape or its exit button. View settings apply to the current visit.
+
+**Extraction tools** holds the starting FEN, font-specific symbol mappings, raw extracted text, OCR layout choices, and extraction diagnostics. Escape closes the drawer. **Notes** keeps review/correction and saved-study controls; **More board controls** contains manual move input, promotion, undo, flip, reset, and PGN export.
+
+Shared visual tokens and control primitives live in `frontend/src/designSystem.css` and `frontend/src/ui.jsx`. Reader layout is owned by `frontend/src/reader.css`; keep reader selectors out of `App.css` and `brand.css` to avoid competing overrides. Preserve the shared 44-pixel control height and visible keyboard focus when adding controls.
+
 ## Structure and game history
 
 Text runs retain page, raw text, font name, estimated size, transformation matrix, bounding box and `hasEOL`. Coordinates separate columns before parsing. Move numbers, side to move and legality reconnect commentary and numbered alternatives. Ambiguous anchors require a choice.

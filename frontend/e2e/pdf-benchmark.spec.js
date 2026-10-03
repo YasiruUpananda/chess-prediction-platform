@@ -1,3 +1,4 @@
+import {readerPane,readerTools,closeReaderTools} from './readerHelpers.js';
 import {test,expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 import process from 'node:process';
@@ -14,29 +15,41 @@ test('real PDF corpus complete-line and variation-attachment benchmark',async({p
     await page.getByLabel('Choose a PDF to read').setInputFiles(sample.file);
     await expect(page.locator('.pdf-toolbar')).toContainText('Page 1 of');
     if(sample.fen) {
+  await readerTools(page);
       await page.getByLabel('Starting position FEN').fill(sample.fen);
+  await readerTools(page);
       await page.getByRole('button',{name:'Apply FEN',exact:true}).click();
     }
     for(const contextPage of sample.contextPages || []) {
+  await closeReaderTools(page);await readerPane(page,'Book');
       if(contextPage!==1) {await page.getByLabel('Go to page').fill(String(contextPage));await page.getByLabel('Go to page').press('Enter');}
+  await closeReaderTools(page);await readerPane(page,'Book');
       if(await page.getByRole('button',{name:'Continue previous game'}).isVisible())await page.getByRole('button',{name:'Continue previous game'}).click();
+      await closeReaderTools(page);await readerPane(page,'Board');
       await expect(page.getByRole('button',{name:/Load reviewed line|Load validated prefix/})).toBeEnabled({timeout:180000});
       await page.getByRole('button',{name:/Load reviewed line|Load validated prefix/}).click();
     }
+  await closeReaderTools(page);await readerPane(page,'Book');
     if(sample.page!==1) {await page.getByLabel('Go to page').fill(String(sample.page));await page.getByLabel('Go to page').press('Enter');}
+  await closeReaderTools(page);await readerPane(page,'Book');
     if(await page.getByRole('button',{name:'Continue previous game'}).isVisible())await page.getByRole('button',{name:'Continue previous game'}).click();
     await expect(page.getByLabel('Review and correct moves')).not.toHaveValue('');
+    await readerTools(page);
     for(const [glyph,piece] of Object.entries(sample.pieces || {})) await page.getByLabel(`Extracted symbol “${glyph}”`,{exact:false}).selectOption(piece);
+  await readerTools(page);
     if(Object.keys(sample.pieces || {}).length) await page.getByRole('button',{name:'Apply piece symbols to this book'}).click();
     if(sample.region) {
+  await closeReaderTools(page);await readerPane(page,'Book');
       await page.getByRole('button',{name:'Select a move line',exact:true}).click();
       for(const [name,value] of Object.entries(sample.region))await page.getByLabel(name,{exact:true}).fill(String(value));
       await page.getByRole('button',{name:'Read this region',exact:true}).click();
     }
     if(sample.ocr) {
+  await readerTools(page);
       if(sample.region && sample.ocrMode)await page.getByLabel('Selected OCR layout').selectOption(sample.ocrMode);
       await page.getByRole('button',{name:sample.region?'OCR selected region':'Try page OCR'}).click();
     }
+    await closeReaderTools(page);await readerPane(page,'Notes');
     await expect(page.getByRole('button',{name:'Validate corrections'})).toBeEnabled({timeout:180000});
     // Read the same persisted structured results used to resume a real session.
     let actual=[];

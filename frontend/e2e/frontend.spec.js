@@ -1,3 +1,4 @@
+import {readerPane,closeReaderTools,boardControls} from './readerHelpers.js';
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
@@ -63,11 +64,14 @@ test('responsive board, keyboard moves and cached player navigation',async({page
   const board=page.getByTestId('responsive-board');
   await expect(board).toBeVisible();
   expect((await board.boundingBox()).width).toBeLessThanOrEqual(page.viewportSize().width);
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').fill('e4');
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').press('Enter');
   await expect(page.getByText('e5: played in 1 of 3 matching games.')).toBeVisible();
   await page.getByRole('button',{name:'Undo turn'}).click();
   await expect(page.getByText(/Game history \/ PGN \(0 plies\)/)).toBeVisible();
+  await closeReaderTools(page);await boardControls(page);
   await page.getByRole('button',{name:'Flip board'}).click();
   await noOverflow(page);
   await page.getByRole('link',{name:'Neuro Chess home'}).click();
@@ -80,7 +84,9 @@ test('obsolete move and report responses cannot restore stale results',async({pa
   const counts=await fixture(page,{moveDelay:600,reportDelay:600});
   await page.goto('/predict');
   await expect(page.getByLabel('Opponent',{exact:true})).toHaveValue('Alice');
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').fill('e4');
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').press('Enter');
   await expect(page.getByRole('button',{name:'Play move',exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Reset game'}).click();
@@ -114,7 +120,9 @@ test('report tabs support keyboard navigation and context changes clear reports'
 test('authentication failures use one recovery action',async({page})=>{
   await fixture(page,{unauthorized:true}); await page.goto('/predict');
   await expect(page.getByLabel('Opponent',{exact:true})).toHaveValue('Alice');
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').fill('e4');
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').press('Enter');
   await expect(page.getByRole('button',{name:'Sign in again'})).toHaveCount(1);
   await expect(page.getByRole('button',{name:'Play move',exact:true})).toBeEnabled();
@@ -127,14 +135,20 @@ test('reader defers PDF tools and supports keyboard study controls',async({page}
   await page.goto('/reader');
   await expect(page.getByRole('heading',{name:'Interactive book reader'})).toBeVisible();
   expect(requested.some((url)=>url.includes('PdfDocumentView')||url.includes('pdf.worker'))).toBeFalsy();
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').fill('e4');
+  await closeReaderTools(page);await boardControls(page);
   await page.getByLabel('Play a move (SAN or UCI)').press('Enter');
   await expect(page.getByText('Black to move',{exact:true})).toBeVisible();
+  await closeReaderTools(page);await readerPane(page,'Board');
   await page.getByRole('button',{name:'Previous move'}).click();
   await expect(page.getByText('White to move',{exact:true})).toBeVisible();
+  await closeReaderTools(page);await readerPane(page,'Board');
   await page.getByRole('button',{name:'Next move'}).click();
+  await closeReaderTools(page);await boardControls(page);
   const download=page.waitForEvent('download'); await page.getByRole('button',{name:'Export current PGN'}).click();
   expect((await download).suggestedFilename()).toBe('book-study.pgn');
+  await closeReaderTools(page);await boardControls(page);
   await page.getByRole('button',{name:'Flip board'}).click();
   await noOverflow(page);
 });
@@ -159,6 +173,7 @@ test('selecting a PDF loads its worker and extracts the numbered line', async ({
   await expect(page.locator('.react-pdf__Page canvas')).toBeVisible();
   await expect(page.locator('.reader-move-chip')).toHaveCount(20);
   await expect(page.getByLabel('Choose main line or variation')).toContainText('20/20 validated plies');
+  await closeReaderTools(page);await readerPane(page,'Board');
   await page.getByRole('button',{name:'Load reviewed line'}).click();
   await expect(page.getByRole('button',{name:'Next move',exact:true})).toBeEnabled();
   expect(requested.some((url)=>url.includes('pdf.worker'))).toBeTruthy();
