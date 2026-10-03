@@ -92,6 +92,9 @@ docker compose run --rm -e RUN_INTEGRATION_TESTS=1 backend-tests
 
 See [Technology adoption](TECHNOLOGY_ADOPTION.md) for local OpenTelemetry/Jaeger,
 generated TypeScript API contracts, React Compiler profiling and optional HNSW retrieval.
+See [Repository quality](REPOSITORY_QUALITY.md) for CI, explicit migrations,
+private deployment networking, bounded report references, chronological evaluation,
+and the Sri Lankan ChessBase PGN import workflow.
 See [Implementation status and measurements](IMPLEMENTATION_STATUS.md) for saved
 studies, exports, Prometheus queries, Web Vitals targets and regression/load-test commands.
 See [Branding and source review](BRANDING_REVIEW.md) for the NeuroChess visual system,
