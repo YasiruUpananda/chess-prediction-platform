@@ -1,0 +1,23 @@
+# Data services have no published host ports and live on an internal network.
+services:
+  db:
+    ports: !reset []
+    networks: [data]
+  redis:
+    networks: [data]
+  rabbitmq:
+    ports: !reset []
+    networks: [data]
+  migrate:
+    networks: [data]
+  ml-engine:
+    networks: [default, data]
+  ml-worker:
+    networks: [default, data]
+  ocr-worker:
+    networks: [data]
+  db-backup:
+    networks: [data]
+networks:
+  data:
+    internal: true

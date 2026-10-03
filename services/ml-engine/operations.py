@@ -40,6 +40,10 @@ def move_user(user=Depends(require_asgardeo_user)):
     return admit(user, 'moves', 60)
 
 
+def evidence_user(user=Depends(require_asgardeo_user)):
+    return admit(user, 'evidence', 60)
+
+
 def require_ingestion_permission(user=Depends(require_asgardeo_user)):
     scope = os.getenv('INGEST_REQUIRED_SCOPE', 'chess:ingest')
     role = os.getenv('INGEST_REQUIRED_ROLE', '')
@@ -55,4 +59,3 @@ def require_ingestion_permission(user=Depends(require_asgardeo_user)):
 
 def ingestion_user(user=Depends(require_asgardeo_user)):
     return admit(require_ingestion_permission(user), 'ingestion', 5)
-

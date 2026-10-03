@@ -22,6 +22,11 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --extra 
 COPY . .
 CMD ["python", "worker.py"]
 
+FROM base AS migration
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+COPY . .
+CMD ["python", "migrate.py", "apply"]
+
 FROM base AS ocr
 RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*

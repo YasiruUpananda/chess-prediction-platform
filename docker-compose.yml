@@ -34,7 +34,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-chessrag}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -65,13 +65,25 @@ services:
       RABBITMQ_DEFAULT_USER: neuro_chess
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_UI_PORT:-15672}:15672"
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_UI_PORT:-15672}:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
+
+  migrate:
+    build:
+      context: ./services/ml-engine
+      target: migration
+    command: python migrate.py apply
+    restart: "no"
+    environment:
+      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+    depends_on:
+      db:
+        condition: service_healthy
 
   ml-engine: &api-service
     build:
@@ -115,10 +127,14 @@ services:
       RATE_MOVES_PER_MINUTE: ${RATE_MOVES_PER_MINUTE:-60}
       RATE_INGESTION_PER_MINUTE: ${RATE_INGESTION_PER_MINUTE:-5}
       RATE_STUDIES_PER_MINUTE: ${RATE_STUDIES_PER_MINUTE:-30}
+      RATE_EVIDENCE_PER_MINUTE: ${RATE_EVIDENCE_PER_MINUTE:-60}
+      HISTORY_PRIOR_STRENGTH: ${HISTORY_PRIOR_STRENGTH:-20}
     volumes:
       - ./services/ml-engine/data:/app/data:ro
       - modelcache:/root/.cache/huggingface
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -160,6 +176,8 @@ services:
       retries: 3
       start_period: 60s
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       rabbitmq:
@@ -182,6 +200,8 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN:-}
       DB_POOL_MAX: 2
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
     healthcheck:
@@ -201,7 +221,7 @@ services:
     ports: []
     healthcheck:
       disable: true
-    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "test_product", "test_measurements", "-v"]
+    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "test_product", "test_measurements", "test_repository_quality", "-v"]
 
   browser-api:
     <<: *api-service
@@ -235,6 +255,8 @@ services:
       - ./scripts/verify-backup.sh:/scripts/verify-backup.sh:ro
       - backups:/backups
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
     healthcheck:

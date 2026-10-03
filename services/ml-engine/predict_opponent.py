@@ -19,7 +19,9 @@ from pydantic import BaseModel, Field, model_validator
 from database import connect
 from rag_store import COLLECTION_NAME, get_vector_store
 
-PROMPT_VERSION = 'qualitative-strategy-v2'
+PROMPT_VERSION = 'compact-evidence-v3'
+REFERENCE_SAMPLE_LIMIT = 6
+MAX_PROMPT_CHARS = 75000
 REPORT_SLOTS = threading.BoundedSemaphore(2)
 REPORT_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='strategy')
 class InsufficientGameData(ValueError): pass
@@ -67,10 +69,10 @@ def factual_statistics(player, color='any'):
             WHERE g.indexed AND c.name=%s AND lower(trim(p.player_name))=%s
             AND (%s='any' OR p.color=%s) ORDER BY g.id''', (COLLECTION_NAME, player,color,color)).fetchall()]
         if not ids: raise InsufficientGameData('No indexed move evidence for this player and color.')
-        results = db.execute('''SELECT color,result,count(DISTINCT game_id),array_agg(DISTINCT game_id)
+        results = db.execute('''SELECT color,result,count(DISTINCT game_id),(array_agg(DISTINCT game_id ORDER BY game_id))[1:6]
             FROM player_moves WHERE game_id=ANY(%s) AND lower(trim(player_name))=%s
             AND (%s='any' OR color=%s) GROUP BY color,result ORDER BY color,result''', (ids,player,color,color)).fetchall()
-        openings = db.execute('''SELECT line,count(*),array_agg(game_id ORDER BY game_id) FROM (
+        openings = db.execute('''SELECT line,count(*),(array_agg(game_id ORDER BY game_id))[1:6] FROM (
             SELECT game_id,string_agg(san,' ' ORDER BY ply) AS line FROM player_moves
             WHERE game_id=ANY(%s) AND ply<=8 GROUP BY game_id) lines
             GROUP BY line ORDER BY count(*) DESC,line LIMIT 10''', (ids,)).fetchall()
@@ -79,7 +81,7 @@ def factual_statistics(player, color='any'):
             AND (%s='any' OR color=%s) AND position_key IS NOT NULL AND ply>8
             GROUP BY position_key HAVING count(DISTINCT game_id)>1
             ORDER BY count(DISTINCT game_id) DESC,position_key LIMIT 10''', (ids,player,color,color)).fetchall()
-    stats = [{'id':'sample','type':'sample','games':len(ids),'game_ids':ids}]
+    stats = [{'id':'sample','type':'sample','games':len(ids),'game_ids':ids[:REFERENCE_SAMPLE_LIMIT]}]
     stats += [{'id':f'result-{i}','type':'result','color':side,'result':result,'games':n,'game_ids':refs}
               for i,(side,result,n,refs) in enumerate(results)]
     stats += [{'id':f'opening-{i}','type':'opening','line':line,'games':n,'game_ids':refs}
@@ -87,9 +89,39 @@ def factual_statistics(player, color='any'):
     stats += [{'id':f'position-{i}','type':'position','position_key':key,'games':n,'game_ids':refs}
               for i,(key,n,refs) in enumerate(positions)]
     for stat in stats:
-        stat['game_ids'] = sorted(stat.get('game_ids', []))
+        stat['game_ids'] = sorted(stat.get('game_ids', []))[:REFERENCE_SAMPLE_LIMIT]
     version = hashlib.sha256(json.dumps([ids,stats],sort_keys=True).encode()).hexdigest()
     return stats,ids,version
+
+
+def reference_page(player, color, statistic_id, version, offset, limit):
+    """Full statistic references stay in SQL; the model receives only samples."""
+    statistics, ids, current = factual_statistics(player, color)
+    if version != current:
+        raise ValueError('Evidence changed. Refresh the report before browsing references.')
+    statistic = next((item for item in statistics if item['id'] == statistic_id), None)
+    if statistic is None:
+        raise LookupError('Statistic not found.')
+    query = 'SELECT DISTINCT g.id,g.white,g.black FROM ingested_games g WHERE g.id=ANY(%s)'
+    params = [ids]
+    if statistic['type'] == 'result':
+        query += ''' AND EXISTS (SELECT 1 FROM player_moves p WHERE p.game_id=g.id
+            AND lower(trim(p.player_name))=%s AND p.color=%s AND p.result IS NOT DISTINCT FROM %s)'''
+        params += [player, statistic['color'], statistic['result']]
+    elif statistic['type'] == 'opening':
+        query += ''' AND (SELECT string_agg(p.san,' ' ORDER BY p.ply) FROM player_moves p
+            WHERE p.game_id=g.id AND p.ply<=8)=%s'''
+        params += [statistic['line']]
+    elif statistic['type'] == 'position':
+        query += ''' AND EXISTS (SELECT 1 FROM player_moves p WHERE p.game_id=g.id
+            AND lower(trim(p.player_name))=%s AND p.position_key=%s AND p.ply>8
+            AND (%s='any' OR p.color=%s))'''
+        params += [player, statistic['position_key'], color, color]
+    query += ' ORDER BY g.id LIMIT %s OFFSET %s'
+    with connect() as db:
+        rows = db.execute(query, (*params, limit, offset)).fetchall()
+    return {'games': [{'id':row[0], 'white':row[1], 'black':row[2]} for row in rows],
+            'total':statistic['games'], 'offset':offset, 'limit':limit, 'data_version':current}
 
 @lru_cache(maxsize=4)
 def report_chain(model_name):
@@ -259,6 +291,8 @@ Empty sections are preferable to unsupported claims. Small or single-event sampl
 representative of overall strength. Explain limitations. Opening lines are first-eight-ply
 sequences, not inferred ECO classifications. Evidence JSON:\n''' + json.dumps({'player':opponent_name,
                 'context':context,'color':color,'statistics':statistics,'sources':sources})
+            if len(prompt) > MAX_PROMPT_CHARS:
+                raise ValueError('Report evidence exceeds the input budget')
             report = StrategyReport.model_validate(await report_chain(model_name).ainvoke(prompt))
             validate_report(report,sources,statistics)
             result = {'opponent':opponent_name,'report':report.model_dump(),'sources':sources,'statistics':statistics,

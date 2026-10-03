@@ -1,3 +1,4 @@
+import uuid
 import asyncio
 import json
 import logging
@@ -10,7 +11,7 @@ from contextlib import asynccontextmanager
 import chess
 import redis.asyncio as aioredis
 from dotenv import find_dotenv, load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -27,7 +28,7 @@ from engine_pool import pool as engine_pool
 from task_queue import enqueue
 import ocr_jobs
 from token_auth import require_asgardeo_user
-from operations import report_user, ocr_user, move_user, ingestion_user, require_ingestion_permission
+from operations import report_user, ocr_user, move_user, ingestion_user, require_ingestion_permission, evidence_user
 from backend_health import readiness
 from fastapi.responses import JSONResponse
 from metrics import ApiMeasurements, CACHE, authorized
@@ -84,6 +85,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 # --- Redis Setup ---
@@ -210,6 +212,37 @@ class StrategyPredictionResponse(BaseModel):
     color: str = "any"
 
 
+class EvidenceReference(BaseModel):
+    id: str
+    white: str
+    black: str
+
+
+class EvidenceReferencePage(BaseModel):
+    games: list[EvidenceReference]
+    total: int
+    offset: int
+    limit: int
+    data_version: str
+
+
+@app.get('/api/v1/evidence/references', response_model=EvidenceReferencePage)
+async def evidence_references(player: str = Query(min_length=1,max_length=200),
+        statistic_id: str = Query(min_length=1,max_length=64),
+        version: str = Query(min_length=1,max_length=64),
+        color: Literal['any','white','black'] = 'any', offset: int = Query(0,ge=0,le=1000000),
+        limit: int = Query(50,ge=1,le=100), _user: dict = Depends(evidence_user)):
+    from predict_opponent import reference_page
+    try:
+        return await asyncio.to_thread(reference_page,player.strip().lower(),color,statistic_id,version,offset,limit)
+    except InsufficientGameData as error:
+        raise HTTPException(422,detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(404,detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(409,detail=str(error)) from error
+
+
 def warm_embeddings():
     try:
         from rag_store import get_vector_store
@@ -315,7 +348,7 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
         except Exception:
             version = None
             logger.warning("Dataset version unavailable; bypassing move cache")
-        cache_key = f"move:v4:{version}:{opponent.strip().casefold()}:{history_signature}:{request.moves is not None}"
+        cache_key = f"move:v5:{PRIOR_STRENGTH}:{version}:{opponent.strip().casefold()}:{history_signature}:{request.moves is not None}"
         if redis_client and version is not None:
             try:
                 cached_data = await asyncio.wait_for(redis_client.get(cache_key), timeout=0.3)
@@ -381,8 +414,11 @@ async def predict_move(request: MovePredictionRequest, _user: dict[str, Any] = D
         return response_data
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        request_id = str(uuid.uuid4())
+        logger.exception("Move prediction failed request_id=%s", request_id)
+        raise HTTPException(status_code=500, detail="Move prediction failed. Please retry.",
+                            headers={"X-Request-ID": request_id})
 
 class IngestRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
