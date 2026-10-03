@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "name":"book page 15",
+      "file":"C:/path/to/private-book.pdf",
+      "page":15,
+      "tags":["real-book","custom-font","two-columns"],
+      "pieces":{"X":"N","Y":"B","Z":"R"},
+      "expected":[["c4","c6","e4","d5","exd5","Nf6","Nc3","cxd5","cxd5","Nxd5","Nf3","e6","Bc4","Nc6","O-O","Be7","d4","O-O","Re1","Nf6"]],
+      "attachments":[],
+      "ocr":false
+    }
+  ]
+}

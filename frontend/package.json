@@ -14,7 +14,9 @@
     "preview": "vite preview",
     "serve": "node scripts/serve-production.mjs",
     "test": "node --test src/*.test.js",
-    "test:browser": "npm run build && playwright test"
+    "test:browser": "npm run build && playwright test",
+    "benchmark:pdf": "node scripts/benchmark-pdf.mjs",
+    "benchmark:pdf:books": "playwright test e2e/pdf-benchmark.spec.js --project desktop"
   },
   "dependencies": {
     "@asgardeo/auth-react": "^5.6.2",

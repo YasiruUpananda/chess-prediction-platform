@@ -1,42 +1,56 @@
-# PDF study reader
+﻿# Document-aware chess book reader
 
-The reader identifies numbered chess lines before validating SAN. Brace comments, semicolon comments, numeric annotation glyphs and nested parenthesized variations are parsed separately. Main lines continue after variations. Ordinary prose such as “See diagram e4 and square d5” does not create a move list. Alternative lines retain the preceding moves needed to reach their branching position.
+Open a local PDF on `/reader`. Previous/Next and the page-number field navigate directly. Review extracted moves and load the line beneath the board. Left/Right arrow keys replay moves; editable fields keep their normal behavior. Branch points ask which continuation to follow.
 
-PDF.js text items retain font identity, transforms, dimensions and end-of-line metadata. Nearby piece-symbol and destination runs are joined using row geometry. A central gutter heuristic separates two columns, and lines show their originating column. Complex layouts, diagrams, rotated text and OCR errors can still require manual correction; this is not a general book-layout recognizer.
+## Structure and game history
 
-Numbered moves after commentary reconnect to earlier legal positions. Prose alternatives become variations when their anchor is unique. If multiple earlier games or variations fit, the reader asks which starting line to use; unresolved passages cannot be replayed. New games beginning at move one remain separate. Reconstruction operates within one page and column; continuing across pages still uses the chosen starting FEN.
+Text runs retain page, raw text, font name, estimated size, transformation matrix, bounding box and `hasEOL`. Coordinates separate columns before parsing. Move numbers, side to move and legality reconnect commentary and numbered alternatives. Ambiguous anchors require a choice.
 
-Custom PDF symbols are mapped by font identity and character. The recognition panel renders a bounded crop of the printed symbol, and confirmed mappings apply to that font throughout the current document session. When a glyph occurs within a longer text run, its horizontal crop is approximate. Missing symbols still require OCR or manual correction. Unicode figurines for both colors normalize directly. Desktop-to-mobile resize transitions are covered by browser regressions.
+When leaving a page with a loaded game for an unread page, choose **Continue previous game**, **Start a new game**, or **Use a diagram FEN**. Continuing seeds parsing with the reviewed line, then merges the next reviewed line into the game tree. Nodes retain parent FEN, SAN/UCI, source spans, comments and alternatives. Earlier branches remain replayable. Separate games are archived in the document's game selector.
 
-Choose a main line or variation, review/edit its SAN, and validate corrections. Illegal moves retain a warning and only their legal prefix can be replayed. Set the book's starting FEN for midgame lines; move numbers and side to move are checked against it. “Use current board as start” supports continuing from a position studied on a previous page.
+Selecting an imported move highlights its estimated printed span and navigates to its source page when needed. Text-run widths provide approximations: ligatures, unusual kerning and split symbols can prevent exact glyph-level highlighting. Deskewed OCR coordinates are not shown as exact original PDF positions. Diagrams/disconnected midgame passages need FEN. Page boundaries require review; this does not claim automatic diagram recognition or reconstruction of every book layout.
 
-“Load reviewed line” returns to its starting position and enables Previous/Next move navigation. Manual board moves create a new branch from the displayed position. Undo removes the last displayed move and its following branch. Board flipping, a promotion-piece selector and export of the current position's PGN are available. PGN includes custom starting FEN and move history. Reset board retains the chosen starting FEN; Standard start restores the usual chess position.
+## Piece fonts and selected notation
 
-Line validation labels describe syntactic/legal extraction checks, not statistical accuracy. OCR word confidence is shown separately and is not a probability that the line or book analysis is correct.
+Standard Unicode figurines normalize to SAN. Custom symbols require confirmed mappings scoped to font/document. The recognition panel shows an actual printed-symbol crop. PDF.js document-instance prefixes are removed from mapping keys so reopening the same document can reuse mappings. Legality offers suggestions only when all complete legal readings agree; it cannot prove the printed piece. Unknown symbols stay unresolved. OCR no longer guesses queens or other pieces for unreadable characters.
 
-## OCR and privacy
+**Select a move line** enables rectangle dragging with pointer/touch input. Alternatively, select PDF text and choose **Read selected PDF text**. Region filtering happens before parsing. Whitespace-token positions within a single long text run are estimated from its width; review the resulting notation.
 
-Text extraction stays local. A scanned page, or the Try page OCR button, renders **only the selected page** to a PNG and uploads it to authenticated `POST /api/v1/extract-page-image`. The full PDF is never uploaded by this reader. The original whole-PDF OCR endpoint remains available for older clients.
+**OCR selected region** renders only that crop. Choose block (`--psm 6`) or single-line (`--psm 7`) mode. Whole-page OCR uses `--psm 3`. Region OCR tries a bounded +/-3 degree deskew on a downscaled projection profile. Accuracy on actual chess fonts still needs measurement; no provider change was made.
 
-The selected-page endpoint accepts PNG/JPEG, a positive page number and at most 8 MB. Image dimensions are checked before pixel decoding/queueing: at most 8,192 pixels per side and `OCR_MAX_PIXELS` total pixels (default 16 million). API and worker use the same Compose setting. The browser bounds its OCR canvas to 4,000 pixels per side and approximately 12 million pixels before allocation. The displayed PDF canvas also has dimension/pixel checks. Locally opened PDF files are limited to 200 MB to bound hashing and PDF worker input.
+The authenticated image endpoint accepts `mode=page|block|line`, PNG/JPEG and at most 8 MB. Full PDFs remain local. Dimension/pixel limits apply before decoding and after deskew; the browser bounds canvas allocation. Validation and queue admission run off the event loop. Existing owner isolation, bounded queue/concurrency, 45-second subprocess deadline and 30-second Tesseract timeout remain. Cache identity includes segmentation mode and `ocr-region-v3`. Uploaded bytes are released after completion/failure and results expire after one hour.
 
-Image validation and database admission run outside the async event loop. The existing durable queue admits at most eight jobs globally and two per owner. The single OCR worker runs each job in a disposable subprocess with a 45-second deadline, Tesseract's 30-second timeout and the existing container memory/CPU limits. OCR returns raw text, word coordinates, word confidence and `ocr-layout-v2`. The client polls for at most three minutes and cancels obsolete requests/rendering when the page or document changes.
+## Local sessions
 
-Jobs and caches are scoped to the authenticated owner's subject. Identical page image content/page/OCR-version reuses a queued, running or completed job for that owner; other owners receive separate jobs and cannot poll it. Uploaded bytes are removed after completion/failure, and finished job results are removed after one hour. The hash is computed by the server from the received image, so a client cannot claim another document's cached content.
+IndexedDB stores metadata under authenticated subject plus document SHA-256 fingerprint. Reopen the same local PDF to restore page, game tree, cursor/variation, FEN, orientation, reviewed lines, corrections and confirmed mappings. The PDF itself is not saved/uploaded. Parser version, FEN and mapping signatures prevent obsolete parsed results from being reused. Up to 40 pages of extraction/review results are retained per document.
 
-Browser extraction uses a bounded 40-entry cache keyed by the full PDF's SHA-256, page, extraction version and extraction mode. It stores raw text/layout, which is revalidated for each starting FEN. It lives only for the reader session. Revisiting pages and changing the starting FEN can reuse extraction without rerunning OCR. Failed OCR requests remain retryable.
+Storage belongs to this browser/device; it is not an encrypted cloud library. **Forget local reading progress** deletes this document's session. Storage failures show a message and leave the tab usable. Saved studies and PGN export remain independent.
+
+## Benchmarks
+
+`npm run benchmark:pdf` reports complete-line and variation-attachment accuracy for labelled notation/layout fixtures. Legal truncation gets no complete-line credit. Fixtures cover the supplied 20-ply transcription, Unicode/custom symbols, two columns, commentary, nested branches and page continuation. These scores describe generated/transcribed fixtures, not real-book OCR accuracy.
+
+For real books, copy `frontend/benchmarks/pdf/manifest.example.json` into an ignored local directory. Set actual file paths and manually labelled complete SAN lines and branch prefixes:
+
+```powershell
+cd frontend
+$env:PDF_BENCHMARK_MANIFEST = '../.runtime/pdf-benchmark/manifest.json'
+npm run benchmark:pdf:books
+```
+
+Include licensed/local real samples of custom fonts, columns, commentary, nested branches, scans and page continuations. The browser harness processes actual PDFs and attaches a JSON accuracy report. Private books/manifests must not be committed. Real-book measurements remain pending until a corpus is provided. Browser regression tests cover cross-page replay and cropping; backend integration tests check complete-line recovery on generated scans.
 
 ## Verification
 
-```
+```powershell
 cd frontend
 npm run lint
+npm test
 npm run build
-node --test src/chessPdf.test.js src/gameHistory.test.js src/requestGate.test.js src/reportStream.test.js
+npm run api:check
+npm run test:browser
 ```
 
-```
-docker compose exec -T -e RUN_INTEGRATION_TESTS=1 ml-engine python -m unittest test_pdf_reader test_reliability_integration
-```
+From the repository root: `docker compose run --rm -e RUN_INTEGRATION_TESTS=1 backend-tests`.
 
-Tests cover nested variations/comments, prose square references, two-column ordering, midgame FENs, underpromotion/PGN history, selected-image OCR, owner isolation, cache reuse, image dimensions/pixel limits, queue admission, subprocess deadlines and the legacy PDF endpoint. References: [PDF.js API](https://mozilla.github.io/pdf.js/api/draft/api.js.html), [FastAPI concurrency](https://fastapi.tiangolo.com/async/).
+References: [PDF.js API](https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib.html), [Tesseract quality and segmentation guidance](https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html).

@@ -1,0 +1,19 @@
+{
+  "kind": "notation regression fixtures; not a real-book OCR corpus",
+  "cases": [
+    {"name":"two columns", "pageWidth":600, "items":[
+      {"str":"1.e4 e5","transform":[12,0,0,12,10,200],"width":80,"height":12},
+      {"str":"2.Nf3 Nc6","transform":[12,0,0,12,10,180],"width":100,"height":12},
+      {"str":"3.Bb5 a6","transform":[12,0,0,12,10,160],"width":100,"height":12},
+      {"str":"1.d4 d5","transform":[12,0,0,12,330,200],"width":80,"height":12},
+      {"str":"2.c4 e6","transform":[12,0,0,12,330,180],"width":80,"height":12},
+      {"str":"3.Nc3 Nf6","transform":[12,0,0,12,330,160],"width":100,"height":12}],
+      "expected":[["e4","e5","Nf3","Nc6","Bb5","a6"],["d4","d5","c4","e6","Nc3","Nf6"]]},
+    {"name":"commentary", "text":"1.e4 e5 Commentary about the centre. 2.Nf3 Nc6", "expected":[["e4","e5","Nf3","Nc6"]]},
+    {"name":"prose alternative", "text":"1.e4 e5 2.Nf3 Nc6 The alternative 2...Nf6", "expected":[["e4","e5","Nf3","Nc6"],["e4","e5","Nf3","Nf6"]], "attachments":[{"line":1,"parent":0,"prefix":["e4","e5","Nf3"]}]},
+    {"name":"nested variations", "text":"1.e4 (1.d4 d5 (1...Nf6) 2.c4) e5 2.Nf3", "expected":[["e4","e5","Nf3"],["d4","d5","c4"],["d4","Nf6"]], "attachments":[{"line":1,"parent":0,"prefix":[]},{"line":2,"parent":0,"prefix":["d4"]}]},
+    {"name":"Unicode figurines", "text":"1.e4 e5 2.♘f3 ♞c6 3.♗b5 a6", "expected":[["e4","e5","Nf3","Nc6","Bb5","a6"]]},
+    {"name":"custom font transcription of supplied book line", "text":"1.c4 c6 2.e4 d5 3.exd5 Xf6 4.Xc3 cxd5 5.cxd5 Xxd5 6.Xf3 e6 7.Yc4 Xc6 8.0-0 Ye7 9.d4 0-0 10.Ze1 Xf6", "mappings":{"X":"N","Y":"B","Z":"R"}, "expected":[["c4","c6","e4","d5","exd5","Nf6","Nc3","cxd5","cxd5","Nxd5","Nf3","e6","Bc4","Nc6","O-O","Be7","d4","O-O","Re1","Nf6"]]},
+    {"name":"page continuation", "prefix":"1.e4 e5 2.Nf3 Nc6", "text":"3.Bb5 a6 The alternative 3...Nf6", "expected":[["e4","e5","Nf3","Nc6","Bb5","a6"],["e4","e5","Nf3","Nc6","Bb5","Nf6"]], "attachments":[{"line":1,"parent":0,"prefix":["e4","e5","Nf3","Nc6","Bb5"]}]}
+  ]
+}
