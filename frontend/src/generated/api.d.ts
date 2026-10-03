@@ -268,6 +268,12 @@ export interface components {
             file: string;
             /** Page */
             page: number;
+            /**
+             * Mode
+             * @default page
+             * @enum {string}
+             */
+            mode: "page" | "block" | "line";
         };
         /** Body_extract_page_moves_api_v1_extract_page_moves_post */
         Body_extract_page_moves_api_v1_extract_page_moves_post: {

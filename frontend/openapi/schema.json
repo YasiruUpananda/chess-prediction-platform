@@ -521,6 +521,16 @@
           "page": {
             "type": "integer",
             "title": "Page"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "page",
+              "block",
+              "line"
+            ],
+            "title": "Mode",
+            "default": "page"
           }
         },
         "type": "object",

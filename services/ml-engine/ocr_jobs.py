@@ -31,7 +31,9 @@ def submit(owner, page, content, cache_key=None):
     return {"job_id": str(job_id), "status": "queued"}
 
 
-def submit_image(owner, page, content):
+def submit_image(owner, page, content, mode="page"):
+    if mode not in ("page", "block", "line"):
+        raise ValueError("Choose page, block, or line OCR.")
     import hashlib
     import io
     from PIL import Image
@@ -45,7 +47,14 @@ def submit_image(owner, page, content):
             image.verify()
     except Image.DecompressionBombError as error:
         raise ValueError('Page dimensions exceed the OCR limit.') from error
-    key = hashlib.sha256(content + f':{page}:ocr-layout-v2'.encode()).hexdigest()
+    if mode != 'page':
+        from PIL.PngImagePlugin import PngInfo
+        with Image.open(io.BytesIO(content)) as image:
+            output = io.BytesIO()
+            metadata = PngInfo(); metadata.add_text('ocr_mode', mode)
+            image.convert('L').save(output, format='PNG', pnginfo=metadata)
+            content = output.getvalue()
+    key = hashlib.sha256(content + f':{page}:{mode}:ocr-region-v3'.encode()).hexdigest()
     return submit(owner,page,content,key)
 
 

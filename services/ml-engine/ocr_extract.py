@@ -9,17 +9,32 @@ import pymupdf as fitz
 import pytesseract
 from PIL import Image
 
-SAN_REGEX = r"(?<![A-Za-z0-9])(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)(?![A-Za-z0-9])"
+SAN_REGEX = r"(?<![^\s.(){}])(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)(?![A-Za-z0-9])"
 
 
-OCR_VERSION = "ocr-layout-v2"
+OCR_VERSION = "ocr-region-v3"
 
 
-def image_ocr(image):
+def image_ocr(image, mode="page"):
+    if mode not in ("page", "block", "line"):
+        raise ValueError("Invalid OCR segmentation mode")
     width, height = image.size
     if max(width,height)>8192 or width*height>int(os.getenv("OCR_MAX_PIXELS", "16000000")):
         raise ValueError("Page dimensions exceed the OCR limit")
-    data = pytesseract.image_to_data(image, config="--psm 3", timeout=30,
+    if mode != "page":
+        probe = image.copy()
+        probe.thumbnail((400, 400))
+        def score(angle):
+            candidate = probe.rotate(angle, fillcolor=255).point(lambda p: 255 if p < 160 else 0)
+            rows = [sum(candidate.crop((0,y,candidate.width,y+1)).get_flattened_data()) for y in range(candidate.height)]
+            mean = sum(rows)/max(1,len(rows))
+            return sum((row-mean)**2 for row in rows)
+        angle = max(range(-3,4), key=lambda angle: (score(angle), -abs(angle)))
+        image = image.rotate(angle, expand=True, fillcolor=255)
+        if max(image.size)>8192 or image.width*image.height>int(os.getenv("OCR_MAX_PIXELS", "16000000")):
+            raise ValueError("Deskewed region exceeds the OCR limit")
+    psm = {"page":3,"block":6,"line":7}[mode]
+    data = pytesseract.image_to_data(image, config=f"--psm {psm}", timeout=30,
                                      output_type=pytesseract.Output.DICT)
     items, lines = [], {}
     for i, word in enumerate(data["text"]):
@@ -58,16 +73,12 @@ def extract(path, page):
             # Check dimensions before decoding/converting the pixels.
             if max(img.size)>8192 or img.width*img.height>int(os.getenv("OCR_MAX_PIXELS","16000000")):
                 raise ValueError("Page dimensions exceed the OCR limit")
-            text,items,confidence = image_ocr(img.convert("L"))
+            text,items,confidence = image_ocr(img.convert("L"), img.info.get("ocr_mode", "page"))
     raw_text = text
-    for pieces, symbol in [("♔♚", "K"), ("♕♛", "Q"), ("♖♜", "R"), ("♗♝", "B"), ("♘♞", "N"), ("♙♟", "")]:
+    for pieces, symbol in [("\u2654\u265a", "K"), ("\u2655\u265b", "Q"), ("\u2656\u265c", "R"), ("\u2657\u265d", "B"), ("\u2658\u265e", "N"), ("\u2659\u265f", "")]:
         for piece in pieces:
             text = text.replace(piece, symbol)
-    text = text.replace("\ufffd", "Q")
-    text = re.sub(r"t(?:ll|t:l|l)\s*(x?[a-h][1-8])", r"N\1", text, flags=re.I)
-    text = re.sub(r"(^|[\s.])i\.\s*(x?[a-h][1-8])", r"\1B\2", text, flags=re.I)
-    text = re.sub(r"!'W", "Q", text, flags=re.I)
-    text = re.sub(r"\bge[l1]\b", "Re1", text, flags=re.I)
+    # Unknown glyphs remain unknown; never invent a piece.
     text = re.sub(r"[0O]-[0O](-[0O])?", lambda m: m[0].replace("0", "O"), text)
     return {"page":page,"moves":re.findall(SAN_REGEX,text),"text":raw_text,"text_items":items,
             "ocr_confidence":confidence,"extraction_version":OCR_VERSION}

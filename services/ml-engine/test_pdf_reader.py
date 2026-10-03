@@ -94,5 +94,51 @@ class PageImageTests(unittest.TestCase):
                 self.assertEqual((await client.get('/api/v1/ocr-jobs/'+result.json()['job_id'])).status_code,404)
         asyncio.run(check())
 
+    def test_line_crop_recovers_complete_notation(self):
+        content=self.image()
+        job=ocr_jobs.submit_image(self.owner,1,content,'line')
+        deadline=time.monotonic()+60
+        while time.monotonic()<deadline:
+            result=ocr_jobs.get(job['job_id'],self.owner)
+            if result['status'] in ('completed','failed'): break
+            time.sleep(.25)
+        self.assertEqual(result['status'],'completed',result)
+        self.assertEqual(result['result']['moves'],['e4','e5','Nf3','Nc6'])
+
 
 if __name__=='__main__': unittest.main()
+
+class RegionOcrTests(unittest.TestCase):
+    def test_segmentation_modes_are_explicit_and_cached_separately(self):
+        content=io.BytesIO();Image.new('L',(100,40),255).save(content,format='PNG')
+        with patch.object(ocr_jobs,'submit',return_value={}) as submit:
+            keys=[]
+            for mode in ('page','block','line'):
+                ocr_jobs.submit_image('owner',1,content.getvalue(),mode)
+                args=submit.call_args.args;keys.append(args[3])
+                if mode!='page':
+                    with Image.open(io.BytesIO(args[2])) as image:
+                        self.assertEqual(image.info['ocr_mode'],mode)
+            self.assertEqual(len(set(keys)),3)
+            with self.assertRaises(ValueError):ocr_jobs.submit_image('owner',1,content.getvalue(),'99')
+
+    def test_unreadable_symbols_are_not_guessed_as_queens(self):
+        import tempfile
+        import ocr_extract
+        data={'text':['1.e4','e5','2.\ufffdf3','Nc6'],'conf':[95]*4,'left':[0]*4,'top':[0]*4,
+              'width':[20]*4,'height':[10]*4,'block_num':[1]*4,'par_num':[1]*4,'line_num':[1]*4}
+        with tempfile.NamedTemporaryFile(suffix='.png') as output:
+            Image.new('L',(100,40),255).save(output.name)
+            with patch.object(ocr_extract.pytesseract,'image_to_data',return_value=data) as recognize:
+                result=ocr_extract.extract(output.name,1)
+            self.assertNotIn('Qf3',result['moves'])
+            self.assertNotIn('f3',result['moves'])
+            self.assertIn('\ufffdf3',result['text'])
+            self.assertEqual(recognize.call_args.kwargs['config'],'--psm 3')
+
+    def test_region_segmentation_is_used_with_bounded_deskew(self):
+        import ocr_extract
+        data={'text':[]}
+        with patch.object(ocr_extract.pytesseract,'image_to_data',return_value=data) as recognize:
+            ocr_extract.image_ocr(Image.new('L',(100,40),255),'line')
+            self.assertEqual(recognize.call_args.kwargs['config'],'--psm 7')

@@ -510,7 +510,7 @@ def ocr_status(job_id: UUID, _user: dict[str, Any] = Depends(require_asgardeo_us
 
 
 @app.post("/api/v1/extract-page-image", status_code=202, response_model=OcrJobResponse)
-async def extract_page_image(file: UploadFile = File(...), page: int = Form(...),
+async def extract_page_image(file: UploadFile = File(...), page: int = Form(...), mode: Literal["page", "block", "line"] = Form("page"),
                              _user: dict[str, Any] = Depends(ocr_user)):
     try:
         if page<1:
@@ -519,7 +519,7 @@ async def extract_page_image(file: UploadFile = File(...), page: int = Form(...)
         if len(content)>8*1024*1024:
             raise HTTPException(status_code=413,detail="Page image exceeds the 8 MB limit.")
         try:
-            job = await asyncio.to_thread(ocr_jobs.submit_image,_user['sub'],page,content)
+            job = await asyncio.to_thread(ocr_jobs.submit_image,_user['sub'],page,content,mode)
         except (ValueError, OSError) as error:
             raise HTTPException(status_code=400,detail=str(error)) from error
         return await asyncio.to_thread(ocr_jobs.get,job['job_id'],_user['sub'])
