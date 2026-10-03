@@ -5,7 +5,7 @@ export function reportMarkdown(result) {
     'Estimates are based on the cited dataset and bounded analysis.', ''];
   for (const section of ['profile','tendencies','weaknesses','recommendations']) {
     lines.push(`## ${section[0].toUpperCase()+section.slice(1)}`, '');
-    for (const claim of result.report[section]) lines.push(`- ${claim.text} (${claim.confidence})`,
+    for (const claim of result.report[section]) lines.push(`- AI interpretation: ${claim.text} (verify against cited evidence)`,
       `  Sources: ${claim.source_game_ids.join(', ') || 'none'}; statistics: ${claim.statistic_ids.join(', ') || 'none'}.`);
     if (!result.report[section].length) lines.push('Insufficient evidence for this section.');
     lines.push('');

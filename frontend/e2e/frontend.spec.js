@@ -5,7 +5,7 @@ import { Buffer } from 'node:buffer';
 const report = {
   opponent:'Alice',context:'',color:'any',supporting_games:1,available_games:3,
   statistics:[{id:'sample',type:'sample',games:3,game_ids:['g1']}],sources:[{id:'g1',white:'Alice',black:'Bob',pgn:'1. e4 e5 *',result:'1-0',date:'2026.01.01',event:'Test',eco:'Unknown',timecontrol:'Unknown'}],
-  report:{profile:[{text:'Cited profile',confidence:'supported',source_game_ids:['g1'],statistic_ids:[]}],tendencies:[],weaknesses:[],recommendations:[],limitations:['Small test sample']},
+  report:{profile:[{text:'Cited profile',confidence:'supported',source_game_ids:['g1'],statistic_ids:['sample']}],tendencies:[],weaknesses:[],recommendations:[],limitations:['Small test sample']},
 };
 async function fixture(page,{moveDelay=0,reportDelay=0,unauthorized=false}={}) {
   const counts={players:0,moves:0,reports:0};
@@ -98,6 +98,8 @@ test('report tabs support keyboard navigation and context changes clear reports'
   await expect(page.getByLabel('Opponent',{exact:true})).toHaveValue('Alice');
   await page.getByRole('button',{name:'Generate RAG Strategy'}).click();
   await expect(page.getByText('Cited profile')).toBeVisible();
+  await expect(page.getByText('Verified statistic: 3 indexed games in this sample')).toBeVisible();
+  await expect(page.getByText('AI interpretation · verify against the cited evidence')).toBeVisible();
   const profile=page.getByRole('tab',{name:/Player profile/});
   await profile.focus(); await profile.press('ArrowRight');
   await expect(page.getByRole('tab',{name:/Behavioral tendencies/})).toBeFocused();

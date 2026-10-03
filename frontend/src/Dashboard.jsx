@@ -23,6 +23,7 @@ import { useGetPlayersQuery } from './store/chessApi';
 import { createRequestGate } from './requestGate';
 import { readReportStream } from './reportStream';
 import { restoreGame, gameSnapshot, formatEvaluation } from './gameHistory';
+import { statisticText } from './statisticText';
 import './App.css'; 
 
 const EMPTY_PLAYERS = [];
@@ -36,10 +37,7 @@ const reportSections = [
 function Statistics({ statistics }) {
   return <details className="report-statistics" open><summary>Verified game statistics</summary>
     <ul>{statistics.map((stat) => <li key={stat.id} id={`stat-${stat.id}`}>
-      {stat.type === 'sample' ? `${stat.games} indexed games in this sample` :
-        stat.type === 'result' ? `${stat.color}: result ${stat.result} in ${stat.games} games` :
-        stat.type === 'opening' ? `${stat.line}: ${stat.games} games` :
-        `Recurring position: ${stat.games} games (${stat.position_key})`}
+      {statisticText(stat)}
       <details><summary>Source game references</summary>{stat.game_ids?.map((id) => <code key={id}>{id}<br /></code>)}</details>
     </li>)}</ul>
   </details>;
@@ -400,7 +398,7 @@ export default function Dashboard() {
                             <div className="report-section-number">{String(index + 1).padStart(2, '0')}</div>
                             <div><span>{tab.kicker}</span><h4>{tab.label}</h4></div>
                           </div>
-                          {visibleReportTab?.id === tab.id && <ReportContent content={tab.content} sources={strategyAnalysis.sources} />}
+                          {visibleReportTab?.id === tab.id && <ReportContent content={tab.content} sources={strategyAnalysis.sources} statistics={strategyAnalysis.statistics} />}
                         </section>
                       ))}
                       <h4>Evidence limitations</h4><ul>{strategyAnalysis.report.limitations.map((text, index) => <li key={index}>{text}</li>)}</ul>

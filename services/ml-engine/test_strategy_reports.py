@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -12,6 +13,51 @@ def report(reference='g1'):
 
 
 class StrategyTests(unittest.TestCase):
+    def test_numerical_model_claims_cannot_masquerade_as_verified_statistics(self):
+        for text in ['Won 99 games','Won ninety percent of games','Won three games']:
+            claim={'text':text,'confidence':'supported','source_game_ids':[],'statistic_ids':['sample']}
+            result=strategy.StrategyReport(profile=[claim],tendencies=[],weaknesses=[],recommendations=[],limitations=['Small sample'])
+            with self.assertRaisesRegex(ValueError,'Numerical claims'):
+                strategy.validate_report(result,[],[{'id':'sample','games':3}])
+
+    def test_cancelled_thread_retains_capacity_until_underlying_work_finishes(self):
+        started=threading.Event();release=threading.Event();finished=threading.Event()
+        slots=threading.BoundedSemaphore(1)
+        def evidence(_player):
+            started.set();release.wait(3);finished.set();return 3
+        async def check():
+            async def consume():
+                async for _event in strategy.strategy_events('Alice'): pass
+            task=asyncio.create_task(consume())
+            while not started.is_set(): await asyncio.sleep(.005)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError): await task
+            self.assertFalse(slots.acquire(blocking=False))
+            release.set()
+            for _ in range(100):
+                if finished.is_set() and slots.acquire(blocking=False):
+                    slots.release();return
+                await asyncio.sleep(.005)
+            self.fail('Capacity was not released after the worker finished')
+        try:
+            with patch.object(strategy,'REPORT_SLOTS',slots),patch.object(strategy,'evidence_count',side_effect=evidence):
+                asyncio.run(check())
+        finally: release.set()
+
+    def test_async_provider_request_closes_on_cancellation(self):
+        async def check():
+            started=asyncio.Event()
+            async def slow_post(*_args,**_kwargs):
+                started.set();await asyncio.sleep(30)
+            client=AsyncMock();client.post.side_effect=slow_post
+            manager=AsyncMock();manager.__aenter__.return_value=client
+            with patch.object(strategy.httpx,'AsyncClient',return_value=manager),patch.dict(strategy.os.environ,{'GOOGLE_API_KEY':'fixture'}):
+                task=asyncio.create_task(strategy.GeminiReportClient('test-model').ainvoke('evidence'))
+                await started.wait();task.cancel()
+                with self.assertRaises(asyncio.CancelledError):await task
+                manager.__aexit__.assert_awaited_once()
+        asyncio.run(check())
+
     def test_claims_require_evidence_and_known_references(self):
         with self.assertRaises(ValidationError):
             strategy.Claim(text='Unsupported',confidence='supported',source_game_ids=[],statistic_ids=[])
