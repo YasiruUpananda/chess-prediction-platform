@@ -1,4 +1,5 @@
 import math
+import os
 import chess
 
 PIECE_VALUES = {
@@ -62,11 +63,15 @@ def relative_move_preferences(scored_moves: list[tuple[chess.Move, float]]) -> l
     return [(scored_moves[index][0], weights[index] / total) for index in range(len(weights))]
 
 
-PRIOR_STRENGTH = 20.0
+PRIOR_STRENGTH = float(os.getenv('HISTORY_PRIOR_STRENGTH', '20'))
+if not math.isfinite(PRIOR_STRENGTH) or PRIOR_STRENGTH <= 0:
+    raise ValueError('HISTORY_PRIOR_STRENGTH must be positive and finite')
 
 
-def combine_history_and_heuristic(scored_moves, historical_counts):
+def combine_history_and_heuristic(scored_moves, historical_counts, prior_strength=PRIOR_STRENGTH):
+    if not math.isfinite(prior_strength) or prior_strength <= 0:
+        raise ValueError('Prior strength must be a positive finite value')
     prior = relative_move_preferences(scored_moves)
     total = sum(max(0, historical_counts.get(move.uci(), 0)) for move, _ in prior)
-    return [(move, (max(0, historical_counts.get(move.uci(), 0)) + PRIOR_STRENGTH * probability)
-                   / (total + PRIOR_STRENGTH)) for move, probability in prior]
+    return [(move, (max(0, historical_counts.get(move.uci(), 0)) + prior_strength * probability)
+                   / (total + prior_strength)) for move, probability in prior]
