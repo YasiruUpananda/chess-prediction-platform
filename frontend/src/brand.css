@@ -213,3 +213,7 @@ summary { cursor: pointer; padding: 8px 0; font-size: 13px; color: #ddd4c6; }
 .pdf-toolbar { flex-wrap: wrap; }
 .reader-page-jump { display:flex; align-items:center; gap:8px; }
 .reader-page-jump input { width:70px; padding:8px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); font:inherit; }
+.reader-side-column, .reader-board-card, .reader-board-frame, .responsive-board, .board-panel, .board-frame { min-width:0; max-width:100%; }
+.responsive-board { width:100%; overflow:hidden; }
+.reader-symbol-preview { display:block; }
+.reader-symbol-preview canvas { max-width:96px; max-height:72px; background:white; border:1px solid var(--line); border-radius:4px; }

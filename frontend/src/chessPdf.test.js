@@ -1,10 +1,49 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
-import { parseChessText, extractSanMoves, textBlocks, customPieceSymbols, suggestPieceMappings, applyPieceMappings } from './chessPdf.js';
+import { parseChessText, extractSanMoves, textBlocks, customPieceSymbols, suggestPieceMappings, applyPieceMappings, parseTextBlocks, fontSymbols, symbolKey, resolveLineAnchor } from './chessPdf.js';
 import { restoreGame, gameSnapshot } from './gameHistory.js';
 
 const bookLine='1.c4 c6 2.e4 d5 3.exd5 ♘f6 4.♘c3 cxd5 5.cxd5 ♘xd5 6.♘f3 e6 7.♗c4 ♘c6 8.0-0 ♗e7 9.d4 0-0 10.♖e1 ♘f6';
+test('commentary resumes the game and prose alternatives attach to their earlier positions',()=>{
+  const lines=parseChessText('1.e4 e5 Commentary about square d5. 2.Nf3 Nc6 The alternative 2...Nf6 is playable. 3.Bb5 a6');
+  assert.deepEqual(lines[0].moves,['e4','e5','Nf3','Nc6']);
+  assert.deepEqual(lines[1].moves,['e4','e5','Nf3','Nf6']);
+  assert.equal(lines[1].variation,true);assert.equal(lines[1].rootId,lines[0].rootId);
+  assert.equal(lines[2].anchorOptions.length,2);
+  assert.deepEqual(resolveLineAnchor(lines[2],lines[2].anchorOptions[1]).moves,['e4','e5','Nf3','Nf6','Bb5','a6']);
+});
+test('ambiguous prose anchors require an explicit choice instead of merging games',()=>{
+  const lines=parseChessText('1.e4 e5 2.Nf3 Nc6\n1.d4 d5 2.Nf3 Nc6 Commentary. 2...Nf6');
+  const unresolved=lines.at(-1);
+  assert.equal(unresolved.anchorOptions.length,2);assert.equal(unresolved.moves.length,0);
+  const resolved=resolveLineAnchor(unresolved,unresolved.anchorOptions[1]);
+  assert.deepEqual(resolved.moves,['d4','d5','Nf3','Nf6']);
+});
+test('an explicit opening alternative is a branch while a new game stays separate',()=>{
+  const lines=parseChessText('1.e4 e5 The alternative 1.d4 d5');
+  assert.equal(lines[1].variation,true);assert.equal(lines[1].rootId,lines[0].rootId);
+  assert.deepEqual(lines[1].moves,['d4','d5']);
+  const games=parseChessText('1.e4 e5 Another game. 1.d4 d5');
+  assert.notEqual(games[1].rootId,games[0].rootId);
+});
+test('separated custom symbols remain visible and mappings cannot replace capture notation',()=>{
+  const line=parseChessText('1.e4 e5 2.X f3 Nc6')[0];
+  assert.equal(line.candidates,4);assert.match(line.issue,/Unrecognized/);
+  assert.equal(applyPieceMappings('exd5',{x:'N'}),'exd5');
+});
+test('font identity and geometry survive extraction and mappings stay inside their font',()=>{
+  const items=[
+    {str:'1.e4 e5 2.',fontName:'body',width:70,height:12,transform:[1,0,0,12,10,100]},
+    {str:'X',fontName:'knight-font',width:9,height:12,transform:[1,0,0,12,80,100]},
+    {str:'f3 Nc6',fontName:'body',width:50,height:12,transform:[1,0,0,12,89,100]},
+    {str:'3.Xb5 a6',fontName:'bishop-font',hasEOL:true,width:60,height:12,transform:[1,0,0,12,10,80]}
+  ];
+  const blocks=textBlocks(items,300),symbols=fontSymbols(blocks);
+  assert.equal(symbols.length,2);assert.equal(blocks[0].items.at(-1).hasEOL,true);
+  assert.equal(parseTextBlocks(blocks,undefined,{[symbolKey('knight-font','X')]:'N'})[0].moves.length,4);
+  assert.equal(parseTextBlocks(blocks,undefined,{[symbolKey('knight-font','X')]:'N',[symbolKey('bishop-font','X')]:'B'})[0].moves.length,6);
+});
 test('custom book fonts are mapped consistently and recover the complete 20-ply line',()=>{
   const encoded=bookLine.replaceAll('♘','\uE123').replaceAll('♗','¤').replaceAll('♖','§');
   assert.deepEqual(customPieceSymbols(encoded),['\uE123','¤','§']);

@@ -2,7 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import ResponsiveBoard from './ResponsiveBoard';
 import SavedStudies from './SavedStudies';
 import { Chess } from 'chess.js';
-import { parseChessText, textBlocks, EXTRACTION_VERSION, customPieceSymbols, suggestPieceMappings } from './chessPdf';
+import { parseChessText, textBlocks, EXTRACTION_VERSION, fontSymbols, parseTextBlocks, suggestPieceMappings, resolveLineAnchor } from './chessPdf';
+import PieceSymbolPreview from './PieceSymbolPreview';
 import { restoreGame, gameSnapshot } from './gameHistory';
 import { buildBookTree, nodeAt, continuation, bookMoveLabels } from './bookReplay';
 import { useSession } from './sessionContext';
@@ -43,7 +44,7 @@ export default function PdfReader() {
   const [extractionInfo, setExtractionInfo] = useState(null);
   const [pieceMappings, setPieceMappings] = useState({});
   const [mappingDraft, setMappingDraft] = useState({});
-  const customSymbols = useMemo(() => customPieceSymbols((extractionInfo?.blocks.map((block)=>block.text).join('\n') || '')+'\n'+editor), [extractionInfo, editor]);
+  const customSymbols = useMemo(() => fontSymbols(extractionInfo?.blocks || []), [extractionInfo]);
   const [documentHash, setDocumentHash] = useState('');
   const [forceOCR, setForceOCR] = useState(false);
   const [extractionAttempt, setExtractionAttempt] = useState(0);
@@ -138,10 +139,13 @@ export default function PdfReader() {
           while (extractionCache.current.size > 40) extractionCache.current.delete(extractionCache.current.keys().next().value);
         }
         if (controller.signal.aborted) return;
-        const found = extracted.blocks.flatMap((block) => parseChessText(block.text, initialFen, false, pieceMappings).map((line) => ({ ...line, column: block.column })));
+        const found = parseTextBlocks(extracted.blocks, initialFen, pieceMappings);
         setLines(found); setSelectedLine(0); setPageMoves(found[0]?.moves || []);
         setEditor(found[0]?.raw || extracted.blocks.map((block) => block.text).join('\n'));
-        setMappingDraft({...suggestPieceMappings(found[0]?.raw || '', initialFen), ...pieceMappings});
+        const suggestions=suggestPieceMappings(found[0]?.raw || '',initialFen);
+        const symbols=fontSymbols(extracted.blocks),draft={...pieceMappings};
+        for(const symbol of symbols) if(symbols.filter(item=>item.glyph===symbol.glyph).length===1 && suggestions[symbol.glyph] && !(symbol.key in draft)) draft[symbol.key]=suggestions[symbol.glyph];
+        setMappingDraft(draft);
         setExtractionInfo({ ...extracted, cached, confidence: found[0]?.confidence || 'low', issue: found[0]?.issue || '' });
         setMoveStatus(found.length ? `${found.length} lines found. Review a line and its starting position before replaying.` : 'No numbered chess line found. You can correct the text or try page OCR.');
       } catch (error) {
@@ -249,7 +253,7 @@ export default function PdfReader() {
   }
   function correctLine() {
     try {
-      const corrected = parseChessText(editor, initialFen, true, pieceMappings);
+      const corrected = parseChessText(editor, initialFen, true);
       if (!corrected.length) { setMoveStatus('Enter SAN moves, for example: e4 e5 Nf3 Nc6.'); return; }
       setLines(corrected.map((line) => ({ ...line, column: 1 }))); setSelectedLine(0);
       setPageMoves(corrected[0].moves);
@@ -384,11 +388,20 @@ export default function PdfReader() {
               {extractionInfo.ocrConfidence != null && ` OCR word confidence: ${Math.round(extractionInfo.ocrConfidence)}%.`}
               {' '}A ply is one move by White or Black. Legality does not prove the whole printed line was extracted.</p>}
             {extractionInfo?.issue && <p className="reader-error" role="alert">{extractionInfo.issue}</p>}
+            {lines[selectedLine]?.anchorOptions && <fieldset><legend>Choose where this continuation starts</legend>
+              <p>More than one earlier line can legally lead to this passage. Compare the printed game before choosing.</p>
+              {lines[selectedLine].anchorOptions.map((option,index)=><button type="button" className="reader-secondary-button" key={index} onClick={()=>{
+                const resolved=resolveLineAnchor(lines[selectedLine],option,initialFen);
+                setLines(lines.map((line,i)=>i===selectedLine?resolved:line));setPageMoves(resolved.moves);setEditor(resolved.raw);
+                setExtractionInfo(info=>({...info,issue:resolved.issue,confidence:resolved.confidence}));
+              }}>{option.label}</button>)}
+            </fieldset>}
             {customSymbols.length > 0 && <fieldset className="reader-symbol-mapping">
               <legend>Recognize this book’s piece symbols</legend>
               <p>Custom PDF fonts can turn a piece into an unrelated character. Compare each symbol with the printed page and confirm its piece. A suggestion appears only when every legal interpretation of the complete line agrees on that symbol.</p>
-              {customSymbols.map((glyph)=><label className="reader-field" key={glyph}>Extracted symbol “{glyph}” (U+{glyph.codePointAt(0).toString(16).toUpperCase()})
-                <select value={mappingDraft[glyph] || ''} onChange={(event)=>setMappingDraft((draft)=>({...draft,[glyph]:event.target.value}))}>
+              {customSymbols.map((symbol)=><label className="reader-field" key={symbol.key}>Extracted symbol “{symbol.glyph}” (U+{symbol.glyph.codePointAt(0).toString(16).toUpperCase()}) · Font {symbol.fontName}
+                {extractionInfo.source==='PDF text' && pdfDocument && <PieceSymbolPreview document={pdfDocument} pageNumber={pageNumber} symbol={symbol} />}
+                <select value={mappingDraft[symbol.key] || ''} onChange={(event)=>setMappingDraft((draft)=>({...draft,[symbol.key]:event.target.value}))}>
                   <option value="">Choose the printed piece</option>
                   <option value="N">♘ Knight (N)</option><option value="B">♗ Bishop (B)</option><option value="R">♖ Rook (R)</option><option value="Q">♕ Queen (Q)</option><option value="K">♔ King (K)</option>
                 </select></label>)}

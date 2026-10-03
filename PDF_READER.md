@@ -2,7 +2,11 @@
 
 The reader identifies numbered chess lines before validating SAN. Brace comments, semicolon comments, numeric annotation glyphs and nested parenthesized variations are parsed separately. Main lines continue after variations. Ordinary prose such as “See diagram e4 and square d5” does not create a move list. Alternative lines retain the preceding moves needed to reach their branching position.
 
-PDF.js text item coordinates are retained and grouped into rows. A central gutter heuristic separates two columns, and lines show their originating column. Complex layouts, diagrams, rotated text and OCR errors can still require manual correction; this is not a general book-layout recognizer.
+PDF.js text items retain font identity, transforms, dimensions and end-of-line metadata. Nearby piece-symbol and destination runs are joined using row geometry. A central gutter heuristic separates two columns, and lines show their originating column. Complex layouts, diagrams, rotated text and OCR errors can still require manual correction; this is not a general book-layout recognizer.
+
+Numbered moves after commentary reconnect to earlier legal positions. Prose alternatives become variations when their anchor is unique. If multiple earlier games or variations fit, the reader asks which starting line to use; unresolved passages cannot be replayed. New games beginning at move one remain separate. Reconstruction operates within one page and column; continuing across pages still uses the chosen starting FEN.
+
+Custom PDF symbols are mapped by font identity and character. The recognition panel renders a bounded crop of the printed symbol, and confirmed mappings apply to that font throughout the current document session. When a glyph occurs within a longer text run, its horizontal crop is approximate. Missing symbols still require OCR or manual correction. Unicode figurines for both colors normalize directly. Desktop-to-mobile resize transitions are covered by browser regressions.
 
 Choose a main line or variation, review/edit its SAN, and validate corrections. Illegal moves retain a warning and only their legal prefix can be replayed. Set the book's starting FEN for midgame lines; move numbers and side to move are checked against it. “Use current board as start” supports continuing from a position studied on a previous page.
 

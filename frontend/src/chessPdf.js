@@ -1,5 +1,5 @@
 ﻿import { Chess } from 'chess.js';
-export const EXTRACTION_VERSION = 'layout-symbols-v5';
+export const EXTRACTION_VERSION = 'layout-document-v6';
 const SAN = /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)$/;
 const UNKNOWN_GLYPH = /[\uFFFD\uE000-\uF8FF¤]/;
 const unreadableMove = (token) => UNKNOWN_GLYPH.test(token) || (!SAN.test(token) && /^[^\s]+[a-h][1-8][+#]?$/.test(token));
@@ -10,6 +10,7 @@ export function applyPieceMappings(text, mappings = {}) {
   return Array.from(text).map((glyph, index, chars) => {
     const piece = mappings[glyph];
     if (!/^[KQRBN]$/.test(piece || '')) return glyph;
+    if (index && /[\p{L}\p{N}]/u.test(chars[index - 1])) return glyph;
     const suffix = chars.slice(index + 1, index + 14).join('');
     return /^\s*[a-h]?[1-8]?x?[a-h][1-8](?:[+#!?\s.,()]|$)/.test(suffix) ? piece : glyph;
   }).join('');
@@ -54,6 +55,7 @@ export function normalizeChessText(text) {
     .replace(/(\d+)\s*\.\s*\.\s*\./g, '$1...')
     .replace(/(\d)\s+(\.)/g, '$1$2')
     .replace(/\b([KQRBN])\s+(?=[a-h1-8x]*[a-h][1-8])/g, '$1')
+    .replace(/(?<![\p{L}\p{N}])([A-Z\p{S}\p{Co}])\s+(?=[a-h]?[1-8]?x?[a-h][1-8](?:[+#!?\s.,()]|$))/gu, '$1')
     // PDF text runs can concatenate a pawn move and a figurine move.
     .replace(/([a-h][1-8](?:=[QRBN])?[+#]?)(?=[^\s.(){}\d][a-h1-8x]*[a-h][1-8])/g, '$1 ')
     .replace(/([^\p{L}\p{N}\s.(){}!?=+#$-])\s+(?=[a-h1-8x]*[a-h][1-8])/gu, '$1');
@@ -64,7 +66,7 @@ export function normalizeChessText(text) {
 // exposed as blocks so readers can select/correct a line instead of merging it.
 export function textBlocks(items, pageWidth) {
   const positioned = items.filter((item) => item.str?.trim() && item.transform)
-    .map((item) => ({ text: item.str, x: item.transform[4], y: item.transform[5],
+    .map((item) => ({ text: item.str, fontName: item.fontName || 'unknown', hasEOL: Boolean(item.hasEOL), transform: [...item.transform], x: item.transform[4], y: item.transform[5],
       width: item.width || 0, height: Math.abs(item.height || item.transform[3] || 10) }));
   const left = positioned.filter((item) => item.x + item.width < pageWidth * .52);
   const right = positioned.filter((item) => item.x > pageWidth * .48);
@@ -80,7 +82,64 @@ export function textBlocks(items, pageWidth) {
       }
       row.items.push(item);
     }
-    return { column: index + 1, text: rows.map((row) => row.items.sort((a,b) => a.x-b.x).map((item) => item.text).join(' ')).join('\n'), items: column };
+    return { column: index + 1, text: rows.map((row) => {
+      const ordered=row.items.sort((a,b)=>a.x-b.x);
+      return ordered.map((item,i)=>{
+        const next=ordered[i+1],glyph=item.text.trim();
+        const adjacent=next && next.x-(item.x+item.width)<=Math.max(2,item.height*.7);
+        const custom=Array.from(glyph).length===1 && !/^[a-h0-9.KQRBN]$/.test(glyph);
+        return item.text+(adjacent && custom && /^[a-h]?[1-8]?x?[a-h][1-8]/.test(next.text)?'':' ');
+      }).join('').trim();
+    }).join('\n'), items: column };
+  });
+}
+
+export const symbolKey = (fontName, glyph) => JSON.stringify([fontName, glyph]);
+
+export function fontSymbols(blocks) {
+  const symbols = new Map();
+  for (const block of blocks) for (const item of block.items || [{text:block.text,fontName:'unknown',x:0,y:0,width:0,height:12}]) {
+    for (const glyph of customPieceSymbols(item.text)) {
+      const key = symbolKey(item.fontName, glyph);
+      if (!symbols.has(key)) {
+        const index = item.text.indexOf(glyph), width = item.width / Math.max(1, item.text.length);
+        symbols.set(key, { key, glyph, fontName:item.fontName, x:item.x + index * width,
+          y:item.y - item.height * .25, width:Math.max(width,item.height * .6), height:item.height });
+      }
+    }
+    // Chess fonts often put a piece in a separate PDF text run.
+    const glyph=item.text.trim();
+    if (Array.from(glyph).length===1 && !/^[KQRBN]?$/.test(normalizeChessText(glyph)) && !/[a-h0-9.KQRBN]/.test(glyph) && /[A-Za-z\p{S}\p{Co}\uFFFD]/u.test(glyph)) {
+      const key=symbolKey(item.fontName,glyph);
+      if(!symbols.has(key)) symbols.set(key,{key,glyph,fontName:item.fontName,x:item.x,y:item.y-item.height*.25,width:Math.max(item.width,item.height*.6),height:item.height});
+    }
+  }
+  return [...symbols.values()];
+}
+
+export function parseTextBlocks(blocks, fen, mappings={}) {
+  return blocks.flatMap((block)=>{
+    let text=block.text;
+    if(block.items?.length) {
+      const items=block.items.map((item)=>{
+        let str=item.text;
+        for(const [key,piece] of Object.entries(mappings)) {
+          const [font,glyph]=JSON.parse(key);
+          if(font===item.fontName && /^[KQRBN]$/.test(piece)) {
+            if(str.trim()===glyph) str=str.replace(glyph,piece);
+            else str=applyPieceMappings(normalizeChessText(str),{[glyph]:piece});
+          }
+        }
+        return {str,width:item.width,height:item.height,fontName:item.fontName,transform:item.transform};
+      });
+      // This is one already-separated column; do not run column detection again.
+      text=textBlocks(items,Infinity)[0]?.text || '';
+    } else {
+      const fallback={};
+      for(const [key,piece] of Object.entries(mappings)) {const [font,glyph]=JSON.parse(key);if(font==='unknown')fallback[glyph]=piece;}
+      text=applyPieceMappings(normalizeChessText(text),fallback);
+    }
+    return parseChessText(text,fen).map((line)=>({...line,column:block.column}));
   });
 }
 
@@ -93,6 +152,27 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
   let pendingNumber = null;
   let active = allowUnnumbered;
   let unmatchedClosing = false;
+  let prose=[];
+  const anchorsFor = (number, turn, candidate) => {
+    const anchors=new Map();
+    for(const line of lines) {
+      if(line.anchorOptions) continue;
+      const board=new Chess(initialFen), prefix=[];
+      for(let i=0;i<=line.steps.length;i++) {
+        if(board.moveNumber()===number && board.turn()===turn) {
+          let legal=true;
+          if(SAN.test(candidate || '')) { try { const copy=new Chess(board.fen());copy.move(candidate); } catch { legal=false; } }
+          if(legal) {
+            const key=JSON.stringify([line.rootId,prefix.map(step=>step.san)]);
+            if(!anchors.has(key)) anchors.set(key,{rootId:line.rootId,steps:[...prefix],label:`Game ${line.rootId+1}: ${prefix.map(step=>step.san).join(' ') || 'starting position'}`});
+          }
+        }
+        if(i===line.steps.length) break;
+        try { board.move(line.steps[i].san);prefix.push(line.steps[i]); } catch { break; }
+      }
+    }
+    return [...anchors.values()];
+  };
   const newLine = (prefix = [], variation = false, parent = null) => {
     const id = lines.length;
     const line = { id, rootId: parent?.rootId ?? id, steps: [...prefix], variation,
@@ -100,7 +180,8 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
     lines.push(line);
     return line;
   };
-  for (let token of tokens) {
+  for (let tokenIndex=0;tokenIndex<tokens.length;tokenIndex++) {
+    let token=tokens[tokenIndex];
     if (token.startsWith('{') || token.startsWith(';') || token.startsWith('$')) continue;
     if (token === '(') {
       stack.push({ current, active, pendingNumber });
@@ -117,6 +198,20 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
     const number = /^(\d+)\.(\.\.)?$/.exec(token);
     if (number) {
       const next = { number: Number(number[1]), turn: number[2] ? 'b' : 'w' };
+      const alternativeCue=/\b(?:alternative|instead|variation)\b/i.test(prose.join(' '));
+      if(!stack.length && !active && current && (!(next.number===1 && next.turn==='w') || alternativeCue)) {
+        const candidate=tokens[tokenIndex+1]?.replace(/[!?.,]+$/g,'');
+        const anchors=anchorsFor(next.number,next.turn,candidate);
+        if(anchors.length===1) {
+          const anchor=anchors[0];
+          if(current.rootId!==anchor.rootId || current.steps.length!==anchor.steps.length || current.steps.some((step,i)=>step.san!==anchor.steps[i].san)) {
+            current=newLine(anchor.steps,true);current.rootId=anchor.rootId;
+          }
+          active=true;
+        } else if(anchors.length>1) {
+          current=newLine([],true);current.anchorOptions=anchors;active=true;
+        }
+      }
       // Books also place a numbered variation before the main reply. Its
       // move number/side identifies the anchor, rather than always undoing a ply.
       if(current?.parentSteps && !current.hasOwnMoves) {
@@ -130,6 +225,7 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
       const previous = current?.steps.findLast((step) => step.number);
       if (!current || !active || (!stack.length && previous && next.number <= (previous.number || 0) && next.turn === 'w')) current = newLine();
       pendingNumber = next; active = true;
+      prose=[];
       continue;
     }
     token = token.replace(/[!?]+$/g, '').replace(/[.,]+$/g, '');
@@ -140,13 +236,15 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
       pendingNumber = null;
     } else if (token !== 'e.p.') {
       active = false;
+      prose.push(token);prose=prose.slice(-32);
     }
   }
   return lines.filter((line) => line.steps.length).map((line) => {
     const game = new Chess(initialFen);
     const moves = [];
-    let issue = stack.length || unmatchedClosing ? 'Unbalanced variation parentheses. Review and correct the notation.' : '';
+    let issue = line.anchorOptions ? 'Several earlier games fit this continuation. Choose its starting line.' : stack.length || unmatchedClosing ? 'Unbalanced variation parentheses. Review and correct the notation.' : '';
     for (const step of line.steps) {
+      if(line.anchorOptions) break;
       if (step.number && (game.moveNumber() !== step.number || game.turn() !== step.turn)) {
         issue = `Move ${step.number}${step.turn === 'b' ? '...' : '.'} does not match the starting position. Set the book position FEN.`;
         break;
@@ -158,14 +256,19 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
       try { moves.push(game.move(step.san).san); }
       catch { issue = `Cannot play ${step.san} after ${moves.length} moves. Correct the line or starting FEN.`; break; }
     }
-    return { id: line.id, rootId: line.rootId, variation: line.variation, raw: line.steps.map((step) => step.san).join(' '),
+    return { id: line.id, rootId: line.rootId, variation: line.variation, anchorOptions:line.anchorOptions?.map(anchor=>({rootId:anchor.rootId,prefix:anchor.steps.map(step=>step.san).join(' '),label:anchor.label})), raw: line.steps.map((step) => step.san).join(' '),
       moves, candidates: line.steps.length, issue, confidence: issue ? 'low' : line.steps.length >= 4 ? 'high' : 'medium' };
   });
 }
 
 export function parseChessText(text, fen, allowUnnumbered = false, mappings = {}) {
   // Separate glued numbering without losing SAN tokens.
-  return extractChessLines(normalizeChessText(applyPieceMappings(text, mappings)).replace(/(\d+\.(?:\.\.)?)(?=[KQRBNabcdefghO])/g, '$1 '), fen, allowUnnumbered);
+  return extractChessLines(normalizeChessText(applyPieceMappings(normalizeChessText(text), mappings)).replace(/(\d+\.(?:\.\.)?)(?=[KQRBNabcdefghO])/g, '$1 '), fen, allowUnnumbered);
+}
+
+export function resolveLineAnchor(line, option, fen) {
+  const resolved=parseChessText(`${option.prefix} ${line.raw}`,fen,true)[0];
+  return {...resolved,id:line.id,rootId:option.rootId,column:line.column,variation:true,anchorOptions:undefined};
 }
 
 export function extractSanMoves(rawText, initialFen) {

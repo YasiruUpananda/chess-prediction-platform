@@ -45,6 +45,45 @@ function pdfFixture(moves='1.e4 e5 2.Nf3 Nc6') {
   return Buffer.from(pdf+`xref\n0 6\n0000000000 65535 f \n${offsets.map(offset=>String(offset).padStart(10,'0')+' 00000 n ').join('\n')}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
 }
 
+test('commentary and prose alternatives form a replayable game tree',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  await page.goto('/reader');
+  await page.getByLabel('Choose a PDF to read').setInputFiles({name:'commentary.pdf',mimeType:'application/pdf',buffer:pdfFixture('1.e4 e5 Commentary. 2.Nf3 Nc6 The alternative 2...Nf6 is playable.')});
+  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+  await expect(page.getByLabel('Choose main line or variation').locator('option')).toHaveCount(2);
+  await page.getByRole('button',{name:'Load reviewed line'}).click();
+  const replay=page.getByRole('region',{name:'Book move replay'});
+  await replay.locator('.reader-move-chip').last().click();
+  const choices=page.getByRole('dialog',{name:'Choose a variation'});
+  await expect(choices.getByRole('button',{name:'Nf6 · Variation',exact:true})).toBeVisible();
+  await choices.getByRole('button',{name:'Nf6 · Variation',exact:true}).click();
+  await expect(replay).toContainText('4 / 4 plies');
+});
+
+test('ambiguous prose continuation asks which earlier game to use',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  await page.goto('/reader');
+  await page.getByLabel('Choose a PDF to read').setInputFiles({name:'ambiguous.pdf',mimeType:'application/pdf',buffer:pdfFixture('1.e4 e5 2.Nf3 Nc6 1.d4 d5 2.Nf3 Nc6 Commentary. 2...Nf6')});
+  await expect(page.getByLabel('Choose main line or variation').locator('option')).toHaveCount(3);
+  await page.getByLabel('Choose main line or variation').selectOption('2');
+  await page.getByRole('button',{name:'Game 2: d4 d5 Nf3',exact:true}).click();
+  await expect(page.getByLabel('Review and correct moves')).toHaveValue('d4 d5 Nf3 Nf6');
+  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+});
+
+test('reader and board shrink after desktop-to-mobile viewport changes',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  await page.setViewportSize({width:1440,height:1000});await page.goto('/reader');
+  await expect(page.getByTestId('responsive-board').locator('[data-boardid]')).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+  await page.getByLabel('Choose a PDF to read').setInputFiles({name:'resize.pdf',mimeType:'application/pdf',buffer:pdfFixture()});
+  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+  await page.setViewportSize({width:1440,height:1000});
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+});
+
 test('custom font characters can be confirmed as pieces and recover all twenty plies',async({page})=>{
   await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
   await page.goto('/reader');
@@ -53,6 +92,7 @@ test('custom font characters can be confirmed as pieces and recover all twenty p
   await expect(page.locator('.reader-move-chip')).toHaveCount(5);
   await expect(page.getByLabel('Extracted symbol “X”', {exact:false})).toHaveValue('N');
   await expect(page.getByLabel('Extracted symbol “Y”', {exact:false})).toHaveValue('B');
+  await expect(page.getByRole('img',{name:/Printed X symbol in font/})).toBeVisible();
   await page.getByLabel('Extracted symbol “Z”', {exact:false}).selectOption('R');
   await page.getByRole('button',{name:'Apply piece symbols to this book'}).click();
   await expect(page.locator('.reader-move-chip')).toHaveCount(20);
