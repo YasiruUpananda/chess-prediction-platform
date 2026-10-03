@@ -1,4 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Field } from './ui';
+import ReaderMoves from './ReaderMoves';
+import './reader.css';
 import ResponsiveBoard from './ResponsiveBoard';
 import SavedStudies from './SavedStudies';
 import { Chess } from 'chess.js';
@@ -14,6 +17,13 @@ const PdfDocumentView = lazy(() => import('./PdfDocumentView'));
 
 export default function PdfReader() {
   const { getAccessToken, state } = useSession();
+  const workspace=useRef(null),tools=useRef(null),splitLayout=useRef(null);
+  const [mobileTab,setMobileTab]=useState('book');
+  const [readerTheme,setReaderTheme]=useState('dark');
+  const [split,setSplit]=useState(56);
+  const [zoom,setZoom]=useState(1);
+  const [isFullscreen,setIsFullscreen]=useState(false);
+  const [viewError,setViewError]=useState('');
   const [documentGames,setDocumentGames]=useState([]);
   const [sessionReady, setSessionReady] = useState(false);
   const [sessionStatus,setSessionStatus]=useState('');
@@ -68,7 +78,7 @@ export default function PdfReader() {
   const [moveStatus, setMoveStatus] = useState('Choose a move to play it on the board.');
 
   useEffect(() => {
-    const observer = new ResizeObserver(([entry]) => setPageWidth(Math.min(760, Math.max(1, Math.floor(entry.contentRect.width - 36)))));
+    const observer = new ResizeObserver(([entry]) => {if(entry.contentRect.width>36)setPageWidth(Math.floor(entry.contentRect.width - 36));});
     if (documentPanel.current) observer.observe(documentPanel.current);
     return () => observer.disconnect();
   }, []);
@@ -124,13 +134,13 @@ export default function PdfReader() {
     let cancelled = false;
     pdfDocument.getPage(pageNumber).then((page) => {
       const viewport = page.getViewport({ scale: 1 });
-      const height = pageWidth * viewport.height / viewport.width;
+      const height = pageWidth * zoom * viewport.height / viewport.width;
       const safe = Number.isFinite(height) && height > 0 && height <= 8192 &&
-        Math.max(viewport.width, viewport.height) <= 14400 && pageWidth * height * 4 <= 16000000;
-      if (!cancelled) setPageGeometry({ document: pdfDocument, page: pageNumber, width: pageWidth, safe });
+        Math.max(viewport.width, viewport.height) <= 14400 && pageWidth * zoom * height * 4 <= 16000000;
+      if (!cancelled) setPageGeometry({ document: pdfDocument, page: pageNumber, width: pageWidth * zoom, safe });
     }).catch(() => { if (!cancelled) setPdfError('Could not read page dimensions.'); });
     return () => { cancelled = true; };
-  }, [pdfDocument, pageNumber, pageWidth]);
+  }, [pdfDocument, pageNumber, pageWidth, zoom]);
 
   useEffect(() => {
     if (!pdfFile || !pdfDocument || !documentHash || sessionReady!==owner+':'+documentHash || pageDecision) return;
@@ -292,7 +302,7 @@ export default function PdfReader() {
     for(let ply=start;ply<bounded;ply++) {
       const choices=nodeAt(tree,path.slice(0,ply))?.children || [];
       if(choices.length>1) {
-        setCursor(ply); setBranchChoices(choices);
+        setMobileTab('board');setCursor(ply); setBranchChoices(choices);
         setMoveStatus('This position has multiple continuations. Choose which variation to study.');
         return;
       }
@@ -358,6 +368,7 @@ export default function PdfReader() {
   }
 
   function clearPdf() {
+    setMobileTab('book');
     setPdfFile(null); setDocumentHash(''); setLines([]); setEditor(''); setExtractionInfo(null); setForceOCR(false); setIsExtracting(false);
     setPdfDocument(null);
     setNumPages(0);
@@ -367,13 +378,29 @@ export default function PdfReader() {
     setBookTree(null);setBookOrigins([]);setBranchChoices([]);
   }
 
+  function openTools() {tools.current?.showModal();}
+  function changeSplit(clientX) {
+    const bounds=splitLayout.current.getBoundingClientRect();
+    setSplit(Math.max(38,Math.min(65,Math.round(100*(clientX-bounds.left)/bounds.width))));
+  }
+  async function toggleFullscreen() {
+    try {
+      if(document.fullscreenElement)await document.exitFullscreen();
+      else await workspace.current.requestFullscreen();
+      setViewError('');
+    } catch {setViewError('Fullscreen is unavailable in this browser.');}
+  }
+  useEffect(()=>{
+    const update=()=>setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange',update);return()=>document.removeEventListener('fullscreenchange',update);
+  },[]);
   async function forgetSession() {
     setSessionReady(false);
     try {await deleteSession(owner+':'+documentHash);clearPdf();setSessionStatus('Local reading progress removed.');}
     catch {setSessionReady(owner+':'+documentHash);setSessionStatus('Could not remove local progress.');}
   }
   return (
-    <main className="reader-shell">
+    <main ref={workspace} className="reader-shell" data-reader-theme={readerTheme} style={{'--reader-split':split+'%'}}>
 
       <div className="reader-title-row">
         <div><span className="eyebrow">Read. Explore. Play.</span><h1>Interactive book reader</h1>
@@ -382,8 +409,19 @@ export default function PdfReader() {
           <button className="reader-secondary-button" type="button" disabled={!documentHash} onClick={forgetSession}>Forget local reading progress</button></div>}
       </div>
 
-      <div className="reader-layout">
-        <section ref={documentPanel} className="reader-document panel" aria-label="PDF document">
+      <div className="reader-view-controls">
+        <Field label="Reading theme"><select value={readerTheme} onChange={event=>setReaderTheme(event.target.value)}><option value="dark">Black and gold</option><option value="paper">Warm paper</option></select></Field>
+        <Button onClick={openTools}>Extraction tools</Button>
+        <Button onClick={toggleFullscreen}>{isFullscreen?'Exit fullscreen':'Fullscreen reader'}</Button>
+      </div>
+      {viewError && <p role="alert">{viewError}</p>}
+      <div className="reader-mobile-tabs" role="tablist" aria-label="Reader workspace" onKeyDown={event=>{
+        const tabs=['book','board','notes'],index=tabs.indexOf(mobileTab);let next;
+        if(event.key==='ArrowRight')next=(index+1)%3;else if(event.key==='ArrowLeft')next=(index+2)%3;else if(event.key==='Home')next=0;else if(event.key==='End')next=2;else return;
+        event.preventDefault();setMobileTab(tabs[next]);event.currentTarget.querySelectorAll('button')[next].focus();
+      }}>{['book','board','notes'].map(tab=><Button key={tab} role="tab" id={`reader-tab-${tab}`} aria-controls={`reader-pane-${tab}`} aria-selected={mobileTab===tab} tabIndex={mobileTab===tab?0:-1} onClick={()=>setMobileTab(tab)}>{tab[0].toUpperCase()+tab.slice(1)}</Button>)}</div>
+      <div className="reader-layout" ref={splitLayout}>
+        <section ref={documentPanel} id="reader-pane-book" className={`reader-document panel reader-pane ${mobileTab==='book'?'is-active':''}`} aria-label="PDF document">
           <div className="reader-panel-heading">
             <div><span className="eyebrow">Your library</span><h2>{pdfFile ? pdfFile.name : 'Open a chess book'}</h2></div>
             {pdfFile && numPages > 0 && <span className="reader-page-count">{pageNumber} / {numPages}</span>}
@@ -417,16 +455,17 @@ export default function PdfReader() {
               {pageDecision && <fieldset><legend>What does this page contain?</legend><p>Continue the previous game, or start a separate game or diagram position.</p>
                 <button type="button" className="reader-secondary-button" onClick={()=>{setBookTree(pageDecision.tree);setTimeline(pageDecision.moves);setContinuationPrefix(pageDecision.moves);setContinuationNotation(treeNotation(pageDecision.tree,pageDecision.moves));setPageDecision(null);}}>Continue previous game</button>
                 <button type="button" className="reader-secondary-button" onClick={()=>{archiveGame();setInitialFen(new Chess().fen());setFenInput(new Chess().fen());setContinuationPrefix([]);setContinuationNotation('');setTimeline([]);setCursor(0);setBookTree(null);setBookOrigins([]);setPageDecision(null);}}>Start a new game</button>
-                <button type="button" className="reader-secondary-button" onClick={()=>{archiveGame();setContinuationPrefix([]);setContinuationNotation('');setTimeline([]);setCursor(0);setBookTree(null);setBookOrigins([]);setPageDecision(null);document.getElementById('reader-start-fen')?.focus();}}>Use a diagram FEN</button>
+                <button type="button" className="reader-secondary-button" onClick={()=>{archiveGame();setContinuationPrefix([]);setContinuationNotation('');setTimeline([]);setCursor(0);setBookTree(null);setBookOrigins([]);setPageDecision(null);openTools();document.getElementById('reader-start-fen')?.focus();}}>Use a diagram FEN</button>
               </fieldset>}
               <p role="status">{sessionStatus}</p>
+              <div className="reader-board-actions" aria-label="PDF zoom"><Button aria-label="Zoom out" onClick={()=>setZoom(value=>Math.max(.5,value-.25))} disabled={zoom<=.5}>-</Button><span>{Math.round(zoom*100)}%</span><Button aria-label="Zoom in" onClick={()=>setZoom(value=>Math.min(2,value+.25))} disabled={zoom>=2}>+</Button><Button onClick={()=>setZoom(1)}>Fit width</Button></div>
               <div className="pdf-page-stage">
                 {pageError && <p id="reader-page-error" className="reader-error" role="alert">{pageError}</p>}
                 <Suspense fallback={<div className="reader-placeholder">Loading PDF viewer...</div>}>
                   <PdfDocumentView file={pdfFile} onLoadSuccess={onDocumentLoadSuccess}
                     onLoadError={(error) => setPdfError(`This PDF could not be opened: ${error.message}`)}
-                    pageNumber={pageNumber} width={pageWidth} selection={selection} selecting={selectRegion} onSelect={(region)=>{setSelection(region);setSelectRegion(false);setForceOCR(false);setExtractionAttempt(attempt=>attempt+1);}} highlight={highlight}
-                    geometryReady={pageGeometry?.document === pdfDocument && pageGeometry.page === pageNumber && pageGeometry.width === pageWidth}
+                    pageNumber={pageNumber} width={pageWidth*zoom} selection={selection} selecting={selectRegion} onSelect={(region)=>{setSelection(region);setSelectRegion(false);setForceOCR(false);setExtractionAttempt(attempt=>attempt+1);}} highlight={highlight}
+                    geometryReady={pageGeometry?.document === pdfDocument && pageGeometry.page === pageNumber && pageGeometry.width === pageWidth*zoom}
                     safe={pageGeometry?.safe} />
                 </Suspense>
               </div>
@@ -435,7 +474,11 @@ export default function PdfReader() {
           {pdfError && <p className="reader-error" role="alert">{pdfError}</p>}
         </section>
 
-        <aside className="reader-side-column">
+        <div className="reader-splitter" role="separator" aria-label="Resize PDF and board" aria-orientation="vertical" aria-valuemin={38} aria-valuemax={65} aria-valuenow={split} tabIndex={0}
+          onPointerDown={event=>{event.currentTarget.setPointerCapture(event.pointerId);changeSplit(event.clientX);}}
+          onPointerMove={event=>{if(event.currentTarget.hasPointerCapture(event.pointerId))changeSplit(event.clientX);}}
+          onKeyDown={event=>{if(event.key==='ArrowLeft' || event.key==='ArrowRight'){event.preventDefault();setSplit(value=>Math.max(38,Math.min(65,value+(event.key==='ArrowRight'?2:-2))));}}} />
+        <aside id="reader-pane-board" className={`reader-side-column reader-pane ${mobileTab==='board'?'is-active':''}`}>
           <section className="reader-board-card panel">
             <div className="reader-panel-heading"><div><span className="eyebrow">Interactive board</span><h2>Try the position</h2></div><span className="reader-turn">{game.turn() === 'w' ? 'White to move' : 'Black to move'}</span></div>
             {documentGames.length>0 && <label className="reader-field">Earlier document games<select defaultValue="" onChange={event=>{
@@ -448,8 +491,12 @@ export default function PdfReader() {
             <section className="reader-replay" ref={replayRegion} tabIndex={0} aria-label="Book move replay">
               <div className="reader-panel-heading"><h3>Book moves</h3><span>{cursor} / {timeline.length} plies</span></div>
               <p className="reader-empty-state">Use ← / → to step backward or forward. Editable fields keep their normal arrow-key behavior.</p>
-              {pageMoves.length>0 && <button className="reader-secondary-button" type="button" onClick={()=>handleReplayMoves()}>{extractionInfo?.issue?'Load validated prefix':'Load reviewed line'}</button>}
-              <div className="reader-move-list">{moveLabels.map((label,index)=><button type="button" key={`${index}-${label}`} className={`reader-move-chip${timeline.length && index===cursor-1?' is-current':''}`} aria-current={timeline.length && index===cursor-1?'step':undefined} onClick={()=>timeline.length?seekMove(index+1):handleReplayMoves(index+1)}>{label}</button>)}</div>
+              {pageMoves.length>0 && <button className="reader-primary-button" type="button" onClick={()=>handleReplayMoves()}>{extractionInfo?.issue?'Load validated prefix':'Load reviewed line'}</button>}
+              <div className="reader-board-actions">
+                <button className="reader-secondary-button" type="button" onClick={()=>seekMove(cursor-1)} disabled={!cursor}>Previous move</button>
+                <button className="reader-secondary-button" type="button" onClick={()=>seekMove(cursor+1)} disabled={cursor>=timeline.length || Boolean(branchChoices.length)}>Next move</button>
+              </div>
+              <ReaderMoves labels={moveLabels} cursor={cursor} loaded={Boolean(timeline.length)} tree={bookTree} path={timeline} onMove={target=>timeline.length?seekMove(target):handleReplayMoves(target)} onVariation={(ply,node)=>{setTimeline([...timeline.slice(0,ply),...continuation(node)]);setCursor(ply+1);setBranchChoices([]);}} />
               {nodeAt(bookTree,timeline.slice(0,cursor))?.comments?.map((comment,index)=><p className="reader-book-comment" key={index}>{comment}</p>)}
               {!timeline.length && !pageMoves.length && <p className="reader-empty-state">Extract or enter a line to start studying.</p>}
               {branchChoices.length>0 && <section ref={branchRegion} className="reader-branch-choice" role="dialog" aria-modal="false" aria-label="Choose a variation" onKeyDown={(event)=>{if(event.key==='Escape'){event.preventDefault();setBranchChoices([]);replayRegion.current?.focus({preventScroll:true});}}}>
@@ -457,11 +504,9 @@ export default function PdfReader() {
                 <div className="reader-board-actions">{branchChoices.map(node=><button key={node.uci} type="button" className="reader-secondary-button" onClick={()=>chooseBranch(node)}>{node.san} · {node.mainLine?'Main line':'Variation'}</button>)}
                   <button type="button" className="text-button" onClick={()=>{setBranchChoices([]);replayRegion.current?.focus({preventScroll:true});}}>Cancel choice</button></div>
               </section>}
-              <div className="reader-board-actions">
-                <button className="reader-secondary-button" type="button" onClick={()=>seekMove(cursor-1)} disabled={!cursor}>Previous move</button>
-                <button className="reader-secondary-button" type="button" onClick={()=>seekMove(cursor+1)} disabled={cursor>=timeline.length || Boolean(branchChoices.length)}>Next move</button>
-              </div>
             </section>
+            <p className="reader-status" aria-live="polite">{moveStatus}</p>
+            <details className="reader-more-controls"><summary>More board controls</summary>
             <form className="keyboard-move-form" onSubmit={(event) => {
               event.preventDefault(); const text = moveInput.trim();
               const move = /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(text) ? { from: text.slice(0,2), to: text.slice(2,4), promotion: text[4] || promotion } : text;
@@ -470,7 +515,7 @@ export default function PdfReader() {
               <input id="reader-keyboard-move" value={moveInput} onChange={(event) => setMoveInput(event.target.value)} autoComplete="off" placeholder="e4 or e2e4" />
               <button className="reader-secondary-button" type="submit">Play move</button>
             </form>
-            <p className="reader-status" aria-live="polite">{moveStatus}</p>
+
             <div className="reader-board-actions">
               <button className="reader-secondary-button" onClick={() => { setTimeline(timeline.slice(0, cursor - 1)); setCursor(cursor - 1); setBookTree(null);setBookOrigins([]);setBranchChoices([]); }} disabled={!cursor}>Undo move</button>
               <button className="reader-secondary-button" onClick={() => setOrientation(orientation === 'white' ? 'black' : 'white')}>Flip board</button>
@@ -480,21 +525,17 @@ export default function PdfReader() {
             <label className="reader-field">Promote pawn to<select value={promotion} onChange={(event) => setPromotion(event.target.value)}>
               <option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option>
             </select></label>
-            <label className="reader-field">Starting position FEN<textarea id="reader-start-fen" value={fenInput} maxLength={120} onChange={(event) => setFenInput(event.target.value)} /></label>
-            <div className="reader-board-actions"><button className="reader-secondary-button" onClick={() => applyFen(fenInput)}>Apply FEN</button>
-              <button className="reader-secondary-button" onClick={() => applyFen(game.fen())}>Use current board as start</button>
-              <button className="reader-secondary-button" onClick={() => applyFen(new Chess().fen())}>Standard start</button></div>
+            </details>
           </section>
 
-          <section className="reader-moves-card panel">
+        </aside>
+        <section id="reader-pane-notes" className={`reader-notes reader-pane ${mobileTab==='notes'?'is-active':''}`} aria-label="Reader notes">
+          <section className="reader-moves-card">
             <div className="reader-panel-heading"><div><span className="eyebrow">Page analysis</span><h2>Moves on this page</h2></div><span className="reader-page-count">{isExtracting ? 'Reading…' : pageMoves.length}</span></div>
             <p className="reader-empty-state">Text extraction stays in your browser. OCR sends only the selected page image.</p>
             {lines.length > 0 && <label className="reader-field">Choose main line or variation<select value={selectedLine} onChange={(event) => selectLine(Number(event.target.value))}>
               {lines.map((line, index) => <option key={index} value={index}>Column {line.column} · {line.variation ? 'Variation' : 'Main line'} {index + 1} · {line.moves.length}/{line.candidates} validated plies</option>)}
             </select></label>}
-            {extractionInfo && <p className="reader-status">{extractionInfo.source}{extractionInfo.cached ? ' · cached' : ''} · Line validation: {extractionInfo.confidence}.
-              {extractionInfo.ocrConfidence != null && ` OCR word confidence: ${Math.round(extractionInfo.ocrConfidence)}%.`}
-              {' '}A ply is one move by White or Black. Legality does not prove the whole printed line was extracted.</p>}
             {extractionInfo?.issue && <p className="reader-error" role="alert">{extractionInfo.issue}</p>}
             {lines[selectedLine]?.anchorOptions && <fieldset><legend>Choose where this continuation starts</legend>
               <p>More than one earlier line can legally lead to this passage. Compare the printed game before choosing.</p>
@@ -504,7 +545,31 @@ export default function PdfReader() {
                 setExtractionInfo(info=>({...info,issue:resolved.issue,confidence:resolved.confidence}));
               }}>{option.label}</button>)}
             </fieldset>}
-            {customSymbols.length > 0 && <fieldset className="reader-symbol-mapping">
+            {pdfFile && <><label className="reader-field">Review and correct moves<textarea rows={5} value={editor} onChange={(event) => setEditor(event.target.value)} maxLength={50000} /></label>
+              <div className="reader-board-actions"><button className="reader-secondary-button" onClick={correctLine} disabled={isExtracting}>Validate corrections</button>
+</div></>}
+            {pdfFile && <Button className="reader-open-board" variant="primary" onClick={()=>{setMobileTab('board');replayRegion.current?.focus({preventScroll:true});}}>Review on board</Button>}
+            {!pdfFile ? <p className="reader-empty-state">Open a PDF to find chess moves on each page.</p> : pageMoves.length ? (
+              <p className="reader-empty-state">The reviewed moves and replay controls are directly beneath the board.</p>
+            ) : <p className="reader-empty-state">{isExtracting ? 'Checking the page text and scanned image…' : 'No valid move tokens found on this page.'}</p>}
+          </section>
+          <SavedStudies owner={state.sub || state.username || 'session'} disabled={isExtracting}
+            snapshot={{fen:game.fen(),initial_fen:initialFen,moves:timeline.slice(0,cursor),opponent_name:'',context:'',color:'any'}}
+            onLoad={(study)=>{if(study.initial_fen!==initialFen){setPageMoves([]);setLines([]);}setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setBookTree(null);setBookOrigins([]);setBranchChoices([]);setMoveInput('');setMoveStatus('Saved study opened.');}} />
+        </section>
+      </div>
+      <dialog className="reader-tools" ref={tools} aria-labelledby="reader-tools-title" role="dialog">
+        <div className="reader-tools-heading"><h2 id="reader-tools-title">Extraction tools</h2><Button onClick={()=>tools.current.close()}>Close tools</Button></div>
+                    <label className="reader-field">Starting position FEN<textarea id="reader-start-fen" value={fenInput} maxLength={120} onChange={(event) => setFenInput(event.target.value)} /></label>
+            <div className="reader-board-actions"><button className="reader-secondary-button" onClick={() => applyFen(fenInput)}>Apply FEN</button>
+              <button className="reader-secondary-button" onClick={() => applyFen(game.fen())}>Use current board as start</button>
+              <button className="reader-secondary-button" onClick={() => applyFen(new Chess().fen())}>Standard start</button></div>
+
+                    {extractionInfo && <p className="reader-status">{extractionInfo.source}{extractionInfo.cached ? ' · cached' : ''} · Line validation: {extractionInfo.confidence}.
+              {extractionInfo.ocrConfidence != null && ` OCR word confidence: ${Math.round(extractionInfo.ocrConfidence)}%.`}
+              {' '}A ply is one move by White or Black. Legality does not prove the whole printed line was extracted.</p>}
+
+                    {customSymbols.length > 0 && <fieldset className="reader-symbol-mapping">
               <legend>Recognize this book’s piece symbols</legend>
               <p>Custom PDF fonts can turn a piece into an unrelated character. Compare each symbol with the printed page and confirm its piece. A suggestion appears only when every legal interpretation of the complete line agrees on that symbol.</p>
               {customSymbols.map((symbol)=><label className="reader-field" key={symbol.key}>Extracted symbol “{symbol.glyph}” (U+{symbol.glyph.codePointAt(0).toString(16).toUpperCase()}) · Font {symbol.fontName}
@@ -519,19 +584,10 @@ export default function PdfReader() {
             {extractionInfo && <details><summary>Raw extracted page text</summary>
               <label className="reader-field">Extracted text before move parsing<textarea readOnly rows={6} value={extractionInfo.blocks.map((block)=>block.text).join('\n\n')} /></label>
             </details>}
-            {pdfFile && <><label className="reader-field">Review and correct moves<textarea rows={5} value={editor} onChange={(event) => setEditor(event.target.value)} maxLength={50000} /></label>
-              <div className="reader-board-actions"><button className="reader-secondary-button" onClick={correctLine} disabled={isExtracting}>Validate corrections</button>
-                <button className="reader-secondary-button" onClick={() => { setForceOCR(true); setExtractionAttempt((attempt) => attempt + 1); }} disabled={isExtracting}>{selection ? 'OCR selected region' : 'Try page OCR'}</button>
-                {selection && <label className="reader-field">Selected OCR layout<select value={ocrMode} onChange={event=>setOcrMode(event.target.value)}><option value="block">Paragraph / move block</option><option value="line">Single move line</option></select></label>}</div></>}
-            {!pdfFile ? <p className="reader-empty-state">Open a PDF to find chess moves on each page.</p> : pageMoves.length ? (
-              <p className="reader-empty-state">The reviewed moves and replay controls are directly beneath the board.</p>
-            ) : <p className="reader-empty-state">{isExtracting ? 'Checking the page text and scanned image…' : 'No valid move tokens found on this page.'}</p>}
-          </section>
-          <SavedStudies owner={state.sub || state.username || 'session'} disabled={isExtracting}
-            snapshot={{fen:game.fen(),initial_fen:initialFen,moves:timeline.slice(0,cursor),opponent_name:'',context:'',color:'any'}}
-            onLoad={(study)=>{if(study.initial_fen!==initialFen){setPageMoves([]);setLines([]);}setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setBookTree(null);setBookOrigins([]);setBranchChoices([]);setMoveInput('');setMoveStatus('Saved study opened.');}} />
-        </aside>
-      </div>
+
+        <div className="reader-board-actions">                <button className="reader-secondary-button" onClick={() => { setForceOCR(true); setExtractionAttempt((attempt) => attempt + 1); }} disabled={isExtracting}>{selection ? 'OCR selected region' : 'Try page OCR'}</button>
+                {selection && <label className="reader-field">Selected OCR layout<select value={ocrMode} onChange={event=>setOcrMode(event.target.value)}><option value="block">Paragraph / move block</option><option value="line">Single move line</option></select></label>}</div>
+      </dialog>
     </main>
   );
 }
