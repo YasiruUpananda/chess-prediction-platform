@@ -217,3 +217,7 @@ summary { cursor: pointer; padding: 8px 0; font-size: 13px; color: #ddd4c6; }
 .responsive-board { width:100%; overflow:hidden; }
 .reader-symbol-preview { display:block; }
 .reader-symbol-preview canvas { max-width:96px; max-height:72px; background:white; border:1px solid var(--line); border-radius:4px; }
+.pdf-selection-surface { position: relative; width: fit-content; max-width: 100%; }
+.pdf-region-selector { position: absolute; inset: 0; z-index: 5; cursor: crosshair; touch-action: none; }
+.pdf-source-highlight { position: absolute; z-index: 6; pointer-events: none; border: 2px solid #a77a24; background: rgba(236,190,100,.18); }
+.pdf-source-highlight.is-move { border-color: #2475ad; background: rgba(50,160,230,.22); }

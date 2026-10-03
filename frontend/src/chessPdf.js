@@ -1,5 +1,5 @@
 ﻿import { Chess } from 'chess.js';
-export const EXTRACTION_VERSION = 'layout-document-v6';
+export const EXTRACTION_VERSION = 'layout-document-v7';
 const SAN = /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)$/;
 const UNKNOWN_GLYPH = /[\uFFFD\uE000-\uF8FF¤]/;
 const unreadableMove = (token) => UNKNOWN_GLYPH.test(token) || (!SAN.test(token) && /^[^\s]+[a-h][1-8][+#]?$/.test(token));
@@ -64,9 +64,9 @@ export function normalizeChessText(text) {
 // Keep positions rather than joining PDF items in arbitrary extraction order.
 // A persistent central gutter identifies two columns; ambiguous layouts are
 // exposed as blocks so readers can select/correct a line instead of merging it.
-export function textBlocks(items, pageWidth) {
+export function textBlocks(items, pageWidth, page = null) {
   const positioned = items.filter((item) => item.str?.trim() && item.transform)
-    .map((item) => ({ text: item.str, fontName: item.fontName || 'unknown', hasEOL: Boolean(item.hasEOL), transform: [...item.transform], x: item.transform[4], y: item.transform[5],
+    .map((item) => ({ text: item.str, rawText: item.str, page, fontSize: Math.hypot(item.transform[2], item.transform[3]), fontName: item.fontName || 'unknown', hasEOL: Boolean(item.hasEOL), transform: [...item.transform], x: item.transform[4], y: item.transform[5],
       width: item.width || 0, height: Math.abs(item.height || item.transform[3] || 10) }));
   const left = positioned.filter((item) => item.x + item.width < pageWidth * .52);
   const right = positioned.filter((item) => item.x > pageWidth * .48);
@@ -94,7 +94,8 @@ export function textBlocks(items, pageWidth) {
   });
 }
 
-export const symbolKey = (fontName, glyph) => JSON.stringify([fontName, glyph]);
+export const fontIdentity = font => font.replace(/^g_d\d+_/, '');
+export const symbolKey = (fontName, glyph) => JSON.stringify([fontIdentity(fontName), glyph]);
 
 export function fontSymbols(blocks) {
   const symbols = new Map();
@@ -117,7 +118,7 @@ export function fontSymbols(blocks) {
   return [...symbols.values()];
 }
 
-export function parseTextBlocks(blocks, fen, mappings={}) {
+export function parseTextBlocks(blocks, fen, mappings={}, prefix='') {
   return blocks.flatMap((block)=>{
     let text=block.text;
     if(block.items?.length) {
@@ -125,7 +126,7 @@ export function parseTextBlocks(blocks, fen, mappings={}) {
         let str=item.text;
         for(const [key,piece] of Object.entries(mappings)) {
           const [font,glyph]=JSON.parse(key);
-          if(font===item.fontName && /^[KQRBN]$/.test(piece)) {
+          if(font===fontIdentity(item.fontName) && /^[KQRBN]$/.test(piece)) {
             if(str.trim()===glyph) str=str.replace(glyph,piece);
             else str=applyPieceMappings(normalizeChessText(str),{[glyph]:piece});
           }
@@ -139,8 +140,50 @@ export function parseTextBlocks(blocks, fen, mappings={}) {
       for(const [key,piece] of Object.entries(mappings)) {const [font,glyph]=JSON.parse(key);if(font==='unknown')fallback[glyph]=piece;}
       text=applyPieceMappings(normalizeChessText(text),fallback);
     }
-    return parseChessText(text,fen).map((line)=>({...line,column:block.column}));
+    return parseChessText(prefix ? prefix+' '+text : text,fen).map((line)=>({...line,column:block.column,
+      source: {page:block.items?.[0]?.page, items:block.items || [], rawText:block.text},
+      moveSources: locateMoves(line.moves, block.items || [], mappings)}));
   });
+}
+
+// A highlight covers the original text run. Keep raw geometry rather than
+// claiming sub-glyph accuracy for fonts with ligatures or split figurines.
+export function locateMoves(moves, items, mappings={}) {
+  let run=0, offset=0;
+  return moves.map(san=>{
+    for(let i=run;i<items.length;i++) {
+      const item=items[i], map={};
+      for(const [key,piece] of Object.entries(mappings)) {const [font,glyph]=JSON.parse(key);if(font===item.fontName)map[glyph]=piece;}
+      const text=applyPieceMappings(normalizeChessText(item.text),map);
+      const index=text.indexOf(san,i===run?offset:0);
+      if(index>=0) {
+        run=i;offset=index+san.length;
+        return {...item,x:item.x+item.width*index/Math.max(1,text.length),width:item.width*san.length/Math.max(1,text.length),approximate:true};
+      }
+    }
+    return null;
+  });
+}
+
+export function regionBlocks(blocks, region) {
+  if(!region) return blocks;
+  const items=blocks.flatMap(block=>block.items || []).flatMap(item=>{
+    const y=item.y+item.height/2;
+    if(y<region.y || y>region.y+region.height || item.x+item.width<region.x || item.x>region.x+region.width) return [];
+    // PDF.js may emit an entire paragraph as one run. Retain only complete
+    // whitespace tokens whose estimated centre is inside the selected region.
+    const raw=item.rawText || item.text;
+    const matches=[...raw.matchAll(/\S+/gu)].filter(match=>{
+      const x=item.x+item.width*(match.index+match[0].length/2)/Math.max(1,raw.length);
+      return x>=region.x && x<=region.x+region.width;
+    });
+    if(!matches.length)return [];
+    const start=matches[0].index,end=matches.at(-1).index+matches.at(-1)[0].length;
+    const text=raw.slice(start,end);
+    const x=item.x+item.width*start/Math.max(1,raw.length);
+    return [{...item,text,rawText:text,x,width:item.width*(end-start)/Math.max(1,raw.length),transform:[...item.transform.slice(0,4),x,item.y],approximate:true}];
+  });
+  return textBlocks(items.map(item=>({...item,str:item.rawText || item.text})),Infinity,items[0]?.page);
 }
 
 export function extractChessLines(rawText, initialFen = new Chess().fen(), allowUnnumbered = false) {
@@ -182,7 +225,12 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
   };
   for (let tokenIndex=0;tokenIndex<tokens.length;tokenIndex++) {
     let token=tokens[tokenIndex];
-    if (token.startsWith('{') || token.startsWith(';') || token.startsWith('$')) continue;
+    if (token.startsWith('{') || token.startsWith(';')) {
+      const step=current?.steps.at(-1);
+      if(step) (step.comments ||= []).push(token.replace(/^[{;]|}$/g,''));
+      continue;
+    }
+    if(token.startsWith('$')) continue;
     if (token === '(') {
       stack.push({ current, active, pendingNumber });
       current = newLine(current?.steps.slice(0, -1) || [], true, current);
@@ -236,6 +284,8 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
       pendingNumber = null;
     } else if (token !== 'e.p.') {
       active = false;
+      const step=current?.steps.at(-1);
+      if(step) (step.comments ||= []).push(token);
       prose.push(token);prose=prose.slice(-32);
     }
   }
@@ -257,7 +307,7 @@ export function extractChessLines(rawText, initialFen = new Chess().fen(), allow
       catch { issue = `Cannot play ${step.san} after ${moves.length} moves. Correct the line or starting FEN.`; break; }
     }
     return { id: line.id, rootId: line.rootId, variation: line.variation, anchorOptions:line.anchorOptions?.map(anchor=>({rootId:anchor.rootId,prefix:anchor.steps.map(step=>step.san).join(' '),label:anchor.label})), raw: line.steps.map((step) => step.san).join(' '),
-      moves, candidates: line.steps.length, issue, confidence: issue ? 'low' : line.steps.length >= 4 ? 'high' : 'medium' };
+      moves, moveComments:line.steps.slice(0,moves.length).map(step=>(step.comments || []).join(' ')), candidates: line.steps.length, issue, confidence: issue ? 'low' : line.steps.length >= 4 ? 'high' : 'medium' };
   });
 }
 

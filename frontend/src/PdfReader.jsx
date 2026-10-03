@@ -2,10 +2,11 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import ResponsiveBoard from './ResponsiveBoard';
 import SavedStudies from './SavedStudies';
 import { Chess } from 'chess.js';
-import { parseChessText, textBlocks, EXTRACTION_VERSION, fontSymbols, parseTextBlocks, suggestPieceMappings, resolveLineAnchor } from './chessPdf';
+import { parseChessText, textBlocks, EXTRACTION_VERSION, fontSymbols, parseTextBlocks, suggestPieceMappings, resolveLineAnchor, regionBlocks } from './chessPdf';
+import { readSession, writeSession, deleteSession } from './readingSession';
 import PieceSymbolPreview from './PieceSymbolPreview';
 import { restoreGame, gameSnapshot } from './gameHistory';
-import { buildBookTree, nodeAt, continuation, bookMoveLabels } from './bookReplay';
+import { buildBookTree, nodeAt, continuation, bookMoveLabels, mergeBookTrees, treeNotation } from './bookReplay';
 import { useSession } from './sessionContext';
 import { friendlyError, waitForPoll } from './api';
 import { extractPageImage, getOcrJob } from './apiClient';
@@ -13,6 +14,17 @@ const PdfDocumentView = lazy(() => import('./PdfDocumentView'));
 
 export default function PdfReader() {
   const { getAccessToken, state } = useSession();
+  const [documentGames,setDocumentGames]=useState([]);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [sessionStatus,setSessionStatus]=useState('');
+  const [selection,setSelection]=useState(null);
+  const [selectRegion,setSelectRegion]=useState(false);
+  const [ocrMode,setOcrMode]=useState('block');
+  const [pageDecision,setPageDecision]=useState(null);
+  const [continuationPrefix,setContinuationPrefix]=useState([]);
+  const [continuationNotation,setContinuationNotation]=useState('');
+  const [highlight,setHighlight]=useState(null);
+  const sessionPages=useRef({});
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfDocument, setPdfDocument] = useState(null);
   const [numPages, setNumPages] = useState(0);
@@ -28,6 +40,7 @@ export default function PdfReader() {
   const [timeline, setTimeline] = useState([]);
   const [cursor, setCursor] = useState(0);
   const [bookTree, setBookTree] = useState(null);
+  const [bookOrigins,setBookOrigins]=useState([]);
   const [branchChoices, setBranchChoices] = useState([]);
   const replayRegion = useRef(null);
   const branchRegion = useRef(null);
@@ -69,6 +82,43 @@ export default function PdfReader() {
     return () => { cancelled = true; };
   }, [pdfFile]);
 
+  const owner=state.sub || state.username || 'session';
+  useEffect(()=>{
+    if(!documentHash) return;
+    let cancelled=false;
+    readSession(owner+':'+documentHash).then(saved=>{
+      if(cancelled) return;
+      if(saved?.version===1 && saved.extractionVersion===EXTRACTION_VERSION) {
+        setPageNumber(saved.pageNumber || 1);setPageInput(null);
+        setInitialFen(saved.initialFen);setFenInput(saved.initialFen);
+        setTimeline(saved.timeline || []);setCursor(saved.cursor || 0);setBookTree(saved.bookTree || null);
+        setBookOrigins(saved.bookOrigins || []);
+        setHighlight(nodeAt(saved.bookTree,saved.timeline?.slice(0,saved.cursor || 0) || [])?.sources?.find(source=>source.page===saved.pageNumber) || null);
+        setPieceMappings(saved.pieceMappings || {});setMappingDraft(saved.pieceMappings || {});
+        setOrientation(saved.orientation || 'white');setDocumentGames(saved.documentGames || []);
+        sessionPages.current=saved.pages || {};
+        setContinuationPrefix(saved.continuationPrefix || []);
+        setContinuationNotation(saved.continuationNotation || '');
+        setSessionStatus('Restored your local reading session.');
+      } else setSessionStatus('Reading progress is saved locally on this device.');
+    }).catch(()=>{if(!cancelled)setSessionStatus('Local storage unavailable; keep this tab open to retain progress.');})
+      .finally(()=>{if(!cancelled)setSessionReady(owner+':'+documentHash);});
+    return ()=>{cancelled=true;};
+  },[documentHash,owner]);
+  useEffect(()=>{
+    if(sessionReady!==owner+':'+documentHash || !documentHash) return;
+    if(extractionInfo?.page===pageNumber && extractionInfo.mappingSignature===JSON.stringify(pieceMappings) && !isExtracting) {
+      sessionPages.current[pageNumber]={lines,selectedLine,editor,extractionInfo,selection,pieceMappings,continuationPrefix,continuationNotation};
+      const pages=Object.keys(sessionPages.current);
+      while(pages.length>40) {const oldest=pages.shift();if(Number(oldest)!==pageNumber)delete sessionPages.current[oldest];}
+    }
+    const timer=setTimeout(()=>{
+      writeSession(owner+':'+documentHash,{pageNumber,initialFen,timeline,cursor,bookTree,bookOrigins,pieceMappings,orientation,
+        continuationPrefix,continuationNotation,documentGames,pages:sessionPages.current,extractionVersion:EXTRACTION_VERSION}).catch(()=>setSessionStatus('Could not save locally. Keep this tab open to retain progress.'));
+    },400);
+    return ()=>clearTimeout(timer);
+  },[sessionReady,documentHash,owner,pageNumber,initialFen,timeline,cursor,bookTree,bookOrigins,pieceMappings,orientation,lines,selectedLine,editor,extractionInfo,isExtracting,selection,continuationPrefix,continuationNotation,documentGames]);
+
   useEffect(() => {
     if (!pdfDocument) return;
     let cancelled = false;
@@ -83,7 +133,7 @@ export default function PdfReader() {
   }, [pdfDocument, pageNumber, pageWidth]);
 
   useEffect(() => {
-    if (!pdfFile || !pdfDocument || !documentHash) return;
+    if (!pdfFile || !pdfDocument || !documentHash || sessionReady!==owner+':'+documentHash || pageDecision) return;
     const controller = new AbortController();
     let renderTask;
     let canvas;
@@ -91,14 +141,20 @@ export default function PdfReader() {
       setIsExtracting(true); setPageMoves([]); setLines([]); setEditor(''); setExtractionInfo(null);
       setMoveStatus(`Reading page ${pageNumber}...`);
       try {
-        const key = `${documentHash}:${pageNumber}:${EXTRACTION_VERSION}:${forceOCR ? 'ocr' : 'text'}`;
+        const saved=sessionPages.current[pageNumber];
+        if(saved && !forceOCR && !extractionAttempt && !selection && saved.extractionInfo.startingFen===initialFen && saved.extractionInfo.mappingSignature===JSON.stringify(pieceMappings)) {
+          setLines(saved.lines);setSelectedLine(saved.selectedLine);setEditor(saved.editor);
+          setPageMoves(saved.lines[saved.selectedLine]?.moves || []);setExtractionInfo(saved.extractionInfo);
+          setMoveStatus('Restored reviewed moves for this page.');return;
+        }
+        const key = `${documentHash}:${pageNumber}:${EXTRACTION_VERSION}:${forceOCR ? 'ocr' : 'text'}:${JSON.stringify(selection)}:${ocrMode}`;
         let extracted = extractionCache.current.get(key);
         const cached = Boolean(extracted);
         if (!extracted) {
           const page = await pdfDocument.getPage(pageNumber);
           const content = await page.getTextContent();
           const viewport = page.getViewport({ scale: 1 });
-          const blocks = textBlocks(content.items, viewport.width);
+          const blocks = regionBlocks(textBlocks(content.items, viewport.width, pageNumber),selection);
           const readableText = blocks.map((block) => block.text).join('\n');
           extracted = { blocks, source: 'PDF text', ocrConfidence: null };
           if (forceOCR || readableText.trim().length < 10) {
@@ -110,13 +166,20 @@ export default function PdfReader() {
             const imageViewport = page.getViewport({ scale });
             canvas = document.createElement('canvas');
             canvas.width = Math.ceil(imageViewport.width); canvas.height = Math.ceil(imageViewport.height);
-            renderTask = page.render({ canvasContext: canvas.getContext('2d'), viewport: imageViewport });
+            if(selection) {
+              const points=[[selection.x,selection.y],[selection.x+selection.width,selection.y+selection.height]].map(([x,y])=>{
+                const [a,b,c,d,e,f]=imageViewport.transform;return [a*x+c*y+e,b*x+d*y+f];
+              });
+              const left=Math.min(...points.map(point=>point[0])),top=Math.min(...points.map(point=>point[1]));
+              canvas.width=Math.ceil(Math.abs(points[1][0]-points[0][0]));canvas.height=Math.ceil(Math.abs(points[1][1]-points[0][1]));
+              renderTask=page.render({canvas,viewport:imageViewport,transform:[1,0,0,1,-left,-top]});
+            } else renderTask = page.render({ canvas, viewport: imageViewport });
             await renderTask.promise;
             if (controller.signal.aborted) return;
             const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
             canvas.width = 0; canvas.height = 0;
             if (!blob || blob.size > 8 * 1024 * 1024) throw new Error('Page image exceeds the 8 MB OCR upload limit.');
-            const formData = new FormData(); formData.append('file', blob, 'page.png'); formData.append('page', String(pageNumber));
+            const formData = new FormData(); formData.append('file', blob, 'page.png'); formData.append('page', String(pageNumber));formData.append('mode',selection?ocrMode:'page');
             let job = await extractPageImage(formData, {
               signal: controller.signal, getAccessToken, timeout: 30000,
             });
@@ -131,7 +194,7 @@ export default function PdfReader() {
             }
             if (job.status !== 'completed') throw new Error(job.error || 'OCR could not process this page.');
             const items = (job.result.text_items || []).map((item) => ({ ...item, transform: [1, 0, 0, item.height, item.x, -item.y] }));
-            extracted = { blocks: items.length ? textBlocks(items, canvas?.width || imageViewport.width) : [{ column: 1, text: job.result.text || '' }],
+            extracted = { blocks: items.length ? textBlocks(items, imageViewport.width, null) : [{ column: 1, text: job.result.text || '' }],
               source: 'Page image OCR', ocrConfidence: job.result.ocr_confidence };
           }
           if (controller.signal.aborted) return;
@@ -139,14 +202,16 @@ export default function PdfReader() {
           while (extractionCache.current.size > 40) extractionCache.current.delete(extractionCache.current.keys().next().value);
         }
         if (controller.signal.aborted) return;
-        const found = parseTextBlocks(extracted.blocks, initialFen, pieceMappings);
+        const prefixBoard=restoreGame(initialFen,continuationPrefix);
+        const prefix=continuationNotation || prefixBoard.pgn().replace(/\[[^\]]*\]/g,'').trim();
+        const found = parseTextBlocks(extracted.blocks, initialFen, pieceMappings, prefix);
         setLines(found); setSelectedLine(0); setPageMoves(found[0]?.moves || []);
         setEditor(found[0]?.raw || extracted.blocks.map((block) => block.text).join('\n'));
         const suggestions=suggestPieceMappings(found[0]?.raw || '',initialFen);
         const symbols=fontSymbols(extracted.blocks),draft={...pieceMappings};
         for(const symbol of symbols) if(symbols.filter(item=>item.glyph===symbol.glyph).length===1 && suggestions[symbol.glyph] && !(symbol.key in draft)) draft[symbol.key]=suggestions[symbol.glyph];
         setMappingDraft(draft);
-        setExtractionInfo({ ...extracted, cached, confidence: found[0]?.confidence || 'low', issue: found[0]?.issue || '' });
+        setExtractionInfo({ ...extracted, page:pageNumber, startingFen:initialFen, mappingSignature:JSON.stringify(pieceMappings), cached, confidence: found[0]?.confidence || 'low', issue: found[0]?.issue || '' });
         setMoveStatus(found.length ? `${found.length} lines found. Review a line and its starting position before replaying.` : 'No numbered chess line found. You can correct the text or try page OCR.');
       } catch (error) {
         if (!controller.signal.aborted) setMoveStatus(`Could not read this page: ${friendlyError(error)}`);
@@ -157,7 +222,7 @@ export default function PdfReader() {
     };
     extractMoves();
     return () => { controller.abort(); renderTask?.cancel(); };
-  }, [getAccessToken, pageNumber, pdfDocument, pdfFile, documentHash, initialFen, forceOCR, extractionAttempt, pieceMappings]);
+  }, [getAccessToken, pageNumber, pdfDocument, pdfFile, documentHash, initialFen, forceOCR, extractionAttempt, pieceMappings, sessionReady, owner, pageDecision, selection, ocrMode, continuationPrefix,continuationNotation]);
 
   function onFileChange(event) {
     const file = event.target.files?.[0];
@@ -168,7 +233,7 @@ export default function PdfReader() {
       return;
     }
     if (file.size > 200 * 1024 * 1024) { setPdfError('Choose a PDF smaller than 200 MB.'); return; }
-    setDocumentHash(''); setForceOCR(false); setLines([]); setEditor(''); setExtractionInfo(null);
+    setSessionReady(false);sessionPages.current={};setDocumentGames([]);setInitialFen(new Chess().fen());setFenInput(new Chess().fen());setSelection(null);setHighlight(null);setPageDecision(null);setContinuationPrefix([]);setContinuationNotation('');setExtractionAttempt(0);setDocumentHash(''); setForceOCR(false); setLines([]); setEditor(''); setExtractionInfo(null);
     setPdfError('');
     setPdfDocument(null);
     setPageMoves([]);
@@ -177,7 +242,7 @@ export default function PdfReader() {
     setPdfFile(file);
     setPageInput('1');setPageError('');
     setPieceMappings({}); setMappingDraft({});
-    setTimeline([]);setCursor(0);setBookTree(null);setBranchChoices([]);
+    setTimeline([]);setCursor(0);setBookTree(null);setBookOrigins([]);setBranchChoices([]);
   }
 
   const onDocumentLoadSuccess = useCallback((document) => {
@@ -193,16 +258,29 @@ export default function PdfReader() {
     if(!input.trim() || !Number.isInteger(target) || target<1 || target>numPages){setPageError(`Enter a page number from 1 to ${numPages}.`);return;}
     navigatePage(target);
   }
-  function navigatePage(target) {
-    setPageInput(null);setPageError('');setForceOCR(false);setPageNumber(target);
+  function navigatePage(target, fromMove=false) {
+    if(target===pageNumber) return;
+    setContinuationPrefix(sessionPages.current[target]?.continuationPrefix || []);
+    setContinuationNotation(sessionPages.current[target]?.continuationNotation || '');
+    setExtractionInfo(null);setLines([]);setPageMoves([]);setEditor('');setPageInput(null);setPageError('');setForceOCR(false);setExtractionAttempt(0);setSelection(null);setHighlight(null);
+    if(!fromMove && target!==pageNumber && timeline.length && !sessionPages.current[target]) {
+      const reviewed=timeline;
+      const tree=bookTree || (lines[selectedLine]?buildBookTree(lines,lines[selectedLine],initialFen):null);
+      setPageDecision({from:pageNumber,to:target,moves:reviewed,tree});
+    }
+    setPageNumber(target);
   }
 
+  function archiveGame() {
+    const moves=pageDecision?.moves || timeline;
+    if(moves.length) setDocumentGames(games=>[...games,{initialFen,moves,tree:pageDecision?.tree || bookTree,origins:bookOrigins,page:pageDecision?.from || pageNumber}]);
+  }
   function commitMove(move) {
     const nextGame = restoreGame(initialFen, timeline.slice(0, cursor));
     try {
       const played = nextGame.move(move);
       const snapshot = gameSnapshot(nextGame);
-      setTimeline(snapshot.moves); setCursor(snapshot.moves.length); setBookTree(null); setBranchChoices([]);
+      setTimeline(snapshot.moves); setCursor(snapshot.moves.length); setBookTree(null);setBookOrigins([]); setBranchChoices([]);
       setMoveStatus(`Played ${played.san}.`); return true;
     } catch { setMoveStatus('This move is illegal from the current position.'); return false; }
   }
@@ -220,6 +298,10 @@ export default function PdfReader() {
       }
     }
     setCursor(bounded);
+    const sources=nodeAt(tree,path.slice(0,bounded))?.sources || [];
+    const source=sources.find(item=>item.page===pageNumber) || sources.find(item=>item.page);
+    if(source?.page && source.page!==pageNumber)navigatePage(source.page,true);
+    setHighlight(source || null);
   }
   function chooseBranch(node) {
     setTimeline([...timeline.slice(0,cursor),...continuation(node)]);
@@ -231,7 +313,11 @@ export default function PdfReader() {
     for (const san of pageMoves) nextGame.move(san);
     const snapshot = gameSnapshot(nextGame);
     if(!lines[selectedLine]) return;
-    const tree=buildBookTree(lines,lines[selectedLine],initialFen);
+    const origin=`${pageNumber}:${lines[selectedLine].rootId}`;
+    const belongs=bookOrigins.includes(origin) || (continuationPrefix.length>0 && lines[selectedLine].rootId===lines[0].rootId);
+    if(bookTree && !belongs)archiveGame();
+    const tree=mergeBookTrees(bookTree && belongs?structuredClone(bookTree):null,buildBookTree(lines,lines[selectedLine],initialFen));
+    setBookOrigins(belongs?[...new Set([...bookOrigins,origin])]:[origin]);
     setBookTree(tree); setTimeline(snapshot.moves); setCursor(0); setBranchChoices([]);
     setMoveStatus(`Loaded ${snapshot.moves.length} plies. Use Left/Right arrow keys or the replay controls.`);
     if(target) seekMove(target,tree,snapshot.moves,0);
@@ -262,7 +348,7 @@ export default function PdfReader() {
     } catch (error) { setMoveStatus(error.message); }
   }
   function applyFen(fen) {
-    try { const board = new Chess(fen); if(board.fen()!==initialFen){setPageMoves([]);setLines([]);} setInitialFen(board.fen()); setFenInput(board.fen()); setTimeline([]); setCursor(0); setBookTree(null); setBranchChoices([]); setMoveStatus('Starting position updated.'); }
+    try { const board = new Chess(fen); if(board.fen()!==initialFen){setPageMoves([]);setLines([]);} setContinuationPrefix([]);setContinuationNotation(''); setInitialFen(board.fen()); setFenInput(board.fen()); setTimeline([]); setCursor(0); setBookTree(null);setBookOrigins([]); setBranchChoices([]); setMoveStatus('Starting position updated.'); }
     catch { setMoveStatus('Invalid FEN. Check the position and side to move.'); }
   }
   function exportPgn() {
@@ -278,16 +364,22 @@ export default function PdfReader() {
     setPageNumber(1);
     setPageMoves([]);
     setPdfError('');
-    setBookTree(null);setBranchChoices([]);
+    setBookTree(null);setBookOrigins([]);setBranchChoices([]);
   }
 
+  async function forgetSession() {
+    setSessionReady(false);
+    try {await deleteSession(owner+':'+documentHash);clearPdf();setSessionStatus('Local reading progress removed.');}
+    catch {setSessionReady(owner+':'+documentHash);setSessionStatus('Could not remove local progress.');}
+  }
   return (
     <main className="reader-shell">
 
       <div className="reader-title-row">
         <div><span className="eyebrow">Read. Explore. Play.</span><h1>Interactive book reader</h1>
           <p>Read a chess book and try its moves on the board as you go.</p></div>
-        {pdfFile && <button className="reader-secondary-button" type="button" onClick={clearPdf}>Choose another PDF</button>}
+        {pdfFile && <div className="reader-board-actions"><button className="reader-secondary-button" type="button" onClick={clearPdf}>Choose another PDF</button>
+          <button className="reader-secondary-button" type="button" disabled={!documentHash} onClick={forgetSession}>Forget local reading progress</button></div>}
       </div>
 
       <div className="reader-layout">
@@ -317,12 +409,23 @@ export default function PdfReader() {
                 </form>
                 <button className="reader-secondary-button" type="button" onClick={() => navigatePage(Math.min(numPages, pageNumber + 1))} disabled={!numPages || pageNumber >= numPages}>Next →</button>
               </div>
+              <div className="reader-board-actions">
+                <button className="reader-secondary-button" type="button" aria-pressed={selectRegion} onClick={()=>setSelectRegion(!selectRegion)}>Select a move line</button>
+                <button className="reader-secondary-button" type="button" disabled={!selection} onClick={()=>{setSelection(null);setForceOCR(false);}}>Read whole page</button>
+                {selectRegion && <p>Drag a rectangle around notation. Turn this off to select PDF text and use “Read selected PDF text” below.</p>}
+              </div>
+              {pageDecision && <fieldset><legend>What does this page contain?</legend><p>Continue the previous game, or start a separate game or diagram position.</p>
+                <button type="button" className="reader-secondary-button" onClick={()=>{setBookTree(pageDecision.tree);setTimeline(pageDecision.moves);setContinuationPrefix(pageDecision.moves);setContinuationNotation(treeNotation(pageDecision.tree,pageDecision.moves));setPageDecision(null);}}>Continue previous game</button>
+                <button type="button" className="reader-secondary-button" onClick={()=>{archiveGame();setInitialFen(new Chess().fen());setFenInput(new Chess().fen());setContinuationPrefix([]);setContinuationNotation('');setTimeline([]);setCursor(0);setBookTree(null);setBookOrigins([]);setPageDecision(null);}}>Start a new game</button>
+                <button type="button" className="reader-secondary-button" onClick={()=>{archiveGame();setContinuationPrefix([]);setContinuationNotation('');setTimeline([]);setCursor(0);setBookTree(null);setBookOrigins([]);setPageDecision(null);document.getElementById('reader-start-fen')?.focus();}}>Use a diagram FEN</button>
+              </fieldset>}
+              <p role="status">{sessionStatus}</p>
               <div className="pdf-page-stage">
                 {pageError && <p id="reader-page-error" className="reader-error" role="alert">{pageError}</p>}
                 <Suspense fallback={<div className="reader-placeholder">Loading PDF viewer...</div>}>
                   <PdfDocumentView file={pdfFile} onLoadSuccess={onDocumentLoadSuccess}
                     onLoadError={(error) => setPdfError(`This PDF could not be opened: ${error.message}`)}
-                    pageNumber={pageNumber} width={pageWidth}
+                    pageNumber={pageNumber} width={pageWidth} selection={selection} selecting={selectRegion} onSelect={(region)=>{setSelection(region);setSelectRegion(false);setForceOCR(false);setExtractionAttempt(attempt=>attempt+1);}} highlight={highlight}
                     geometryReady={pageGeometry?.document === pdfDocument && pageGeometry.page === pageNumber && pageGeometry.width === pageWidth}
                     safe={pageGeometry?.safe} />
                 </Suspense>
@@ -335,6 +438,10 @@ export default function PdfReader() {
         <aside className="reader-side-column">
           <section className="reader-board-card panel">
             <div className="reader-panel-heading"><div><span className="eyebrow">Interactive board</span><h2>Try the position</h2></div><span className="reader-turn">{game.turn() === 'w' ? 'White to move' : 'Black to move'}</span></div>
+            {documentGames.length>0 && <label className="reader-field">Earlier document games<select defaultValue="" onChange={event=>{
+              const saved=documentGames[Number(event.target.value)];if(!saved)return;
+              archiveGame();setInitialFen(saved.initialFen);setFenInput(saved.initialFen);setTimeline(saved.moves);setCursor(0);setBookTree(saved.tree);setBookOrigins(saved.origins || []);setContinuationPrefix(saved.moves);setContinuationNotation(treeNotation(saved.tree,saved.moves));setPageDecision(null);
+            }}><option value="" disabled>Choose a saved game</option>{documentGames.map((saved,index)=><option key={index} value={index}>Game {index+1} · page {saved.page} · {saved.moves.length} plies</option>)}</select></label>}
             <div className="reader-board-frame">
               <ResponsiveBoard position={game.fen()} boardOrientation={orientation} onPieceDrop={onDrop} customDarkSquareStyle={{ backgroundColor: '#786347' }} customLightSquareStyle={{ backgroundColor: '#eee5d3' }} />
             </div>
@@ -343,6 +450,7 @@ export default function PdfReader() {
               <p className="reader-empty-state">Use ← / → to step backward or forward. Editable fields keep their normal arrow-key behavior.</p>
               {pageMoves.length>0 && <button className="reader-secondary-button" type="button" onClick={()=>handleReplayMoves()}>{extractionInfo?.issue?'Load validated prefix':'Load reviewed line'}</button>}
               <div className="reader-move-list">{moveLabels.map((label,index)=><button type="button" key={`${index}-${label}`} className={`reader-move-chip${timeline.length && index===cursor-1?' is-current':''}`} aria-current={timeline.length && index===cursor-1?'step':undefined} onClick={()=>timeline.length?seekMove(index+1):handleReplayMoves(index+1)}>{label}</button>)}</div>
+              {nodeAt(bookTree,timeline.slice(0,cursor))?.comments?.map((comment,index)=><p className="reader-book-comment" key={index}>{comment}</p>)}
               {!timeline.length && !pageMoves.length && <p className="reader-empty-state">Extract or enter a line to start studying.</p>}
               {branchChoices.length>0 && <section ref={branchRegion} className="reader-branch-choice" role="dialog" aria-modal="false" aria-label="Choose a variation" onKeyDown={(event)=>{if(event.key==='Escape'){event.preventDefault();setBranchChoices([]);replayRegion.current?.focus({preventScroll:true});}}}>
                 <h4>Which continuation would you like to study?</h4><p>Choose a move from this position to continue.</p>
@@ -364,15 +472,15 @@ export default function PdfReader() {
             </form>
             <p className="reader-status" aria-live="polite">{moveStatus}</p>
             <div className="reader-board-actions">
-              <button className="reader-secondary-button" onClick={() => { setTimeline(timeline.slice(0, cursor - 1)); setCursor(cursor - 1); setBookTree(null);setBranchChoices([]); }} disabled={!cursor}>Undo move</button>
+              <button className="reader-secondary-button" onClick={() => { setTimeline(timeline.slice(0, cursor - 1)); setCursor(cursor - 1); setBookTree(null);setBookOrigins([]);setBranchChoices([]); }} disabled={!cursor}>Undo move</button>
               <button className="reader-secondary-button" onClick={() => setOrientation(orientation === 'white' ? 'black' : 'white')}>Flip board</button>
-              <button className="reader-secondary-button" onClick={() => { setTimeline([]); setCursor(0);setBookTree(null);setBranchChoices([]); }}>Reset board</button>
+              <button className="reader-secondary-button" onClick={() => { setTimeline([]); setCursor(0);setBookTree(null);setBookOrigins([]);setBranchChoices([]); }}>Reset board</button>
               <button className="reader-secondary-button" onClick={exportPgn}>Export current PGN</button>
             </div>
             <label className="reader-field">Promote pawn to<select value={promotion} onChange={(event) => setPromotion(event.target.value)}>
               <option value="q">Queen</option><option value="r">Rook</option><option value="b">Bishop</option><option value="n">Knight</option>
             </select></label>
-            <label className="reader-field">Starting position FEN<textarea value={fenInput} maxLength={120} onChange={(event) => setFenInput(event.target.value)} /></label>
+            <label className="reader-field">Starting position FEN<textarea id="reader-start-fen" value={fenInput} maxLength={120} onChange={(event) => setFenInput(event.target.value)} /></label>
             <div className="reader-board-actions"><button className="reader-secondary-button" onClick={() => applyFen(fenInput)}>Apply FEN</button>
               <button className="reader-secondary-button" onClick={() => applyFen(game.fen())}>Use current board as start</button>
               <button className="reader-secondary-button" onClick={() => applyFen(new Chess().fen())}>Standard start</button></div>
@@ -405,22 +513,23 @@ export default function PdfReader() {
                   <option value="">Choose the printed piece</option>
                   <option value="N">♘ Knight (N)</option><option value="B">♗ Bishop (B)</option><option value="R">♖ Rook (R)</option><option value="Q">♕ Queen (Q)</option><option value="K">♔ King (K)</option>
                 </select></label>)}
-              <button type="button" className="reader-secondary-button" disabled={isExtracting} onClick={()=>{setTimeline([]);setCursor(0);setBookTree(null);setBranchChoices([]);setPieceMappings({...mappingDraft});}}>Apply piece symbols to this book</button>
-              <p>Mappings stay in this reading session and apply to every page of this document. If a piece is missing from extracted text entirely, use page OCR or correct the moves.</p>
+              <button type="button" className="reader-secondary-button" disabled={isExtracting} onClick={()=>{setTimeline([]);setCursor(0);setBookTree(null);setBookOrigins([]);setBranchChoices([]);setPieceMappings({...mappingDraft});}}>Apply piece symbols to this book</button>
+              <p>Confirmed mappings are saved locally for this document and apply to every page. If a piece is missing from extracted text entirely, use page OCR or correct the moves.</p>
             </fieldset>}
             {extractionInfo && <details><summary>Raw extracted page text</summary>
               <label className="reader-field">Extracted text before move parsing<textarea readOnly rows={6} value={extractionInfo.blocks.map((block)=>block.text).join('\n\n')} /></label>
             </details>}
             {pdfFile && <><label className="reader-field">Review and correct moves<textarea rows={5} value={editor} onChange={(event) => setEditor(event.target.value)} maxLength={50000} /></label>
               <div className="reader-board-actions"><button className="reader-secondary-button" onClick={correctLine} disabled={isExtracting}>Validate corrections</button>
-                <button className="reader-secondary-button" onClick={() => { setForceOCR(true); setExtractionAttempt((attempt) => attempt + 1); }} disabled={isExtracting}>Try page OCR</button></div></>}
+                <button className="reader-secondary-button" onClick={() => { setForceOCR(true); setExtractionAttempt((attempt) => attempt + 1); }} disabled={isExtracting}>{selection ? 'OCR selected region' : 'Try page OCR'}</button>
+                {selection && <label className="reader-field">Selected OCR layout<select value={ocrMode} onChange={event=>setOcrMode(event.target.value)}><option value="block">Paragraph / move block</option><option value="line">Single move line</option></select></label>}</div></>}
             {!pdfFile ? <p className="reader-empty-state">Open a PDF to find chess moves on each page.</p> : pageMoves.length ? (
               <p className="reader-empty-state">The reviewed moves and replay controls are directly beneath the board.</p>
             ) : <p className="reader-empty-state">{isExtracting ? 'Checking the page text and scanned image…' : 'No valid move tokens found on this page.'}</p>}
           </section>
           <SavedStudies owner={state.sub || state.username || 'session'} disabled={isExtracting}
             snapshot={{fen:game.fen(),initial_fen:initialFen,moves:timeline.slice(0,cursor),opponent_name:'',context:'',color:'any'}}
-            onLoad={(study)=>{if(study.initial_fen!==initialFen){setPageMoves([]);setLines([]);}setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setBookTree(null);setBranchChoices([]);setMoveInput('');setMoveStatus('Saved study opened.');}} />
+            onLoad={(study)=>{if(study.initial_fen!==initialFen){setPageMoves([]);setLines([]);}setInitialFen(study.initial_fen);setFenInput(study.initial_fen);setTimeline(study.moves);setCursor(study.moves.length);setBookTree(null);setBookOrigins([]);setBranchChoices([]);setMoveInput('');setMoveStatus('Saved study opened.');}} />
         </aside>
       </div>
     </main>

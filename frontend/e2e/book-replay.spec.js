@@ -141,3 +141,88 @@ test('book replay sits under the board, pauses for nested choices and supports a
   await expect(replay).toContainText('0 / 0 plies');
   await expect(page.getByRole('heading',{name:'Try the position'})).toBeVisible();
 });
+function twoPageStudy() {
+  const texts=['1.e4 e5 2.Nf3 Nc6','3.Bb5 a6 The alternative 3...Nf6'];
+  const streams=texts.map(text=>`BT /F1 14 Tf 10 160 Td (${text}) Tj ET`);
+  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',...streams.map(text=>`<< /Length ${text.length} >>\nstream\n${text}\nendstream`)];
+  let pdf='%PDF-1.4\n';const offsets=[];
+  objects.forEach((object,index)=>{offsets.push(pdf.length);pdf+=`${index+1} 0 obj\n${object}\nendobj\n`;});
+  const xref=pdf.length;
+  return Buffer.from(pdf+`xref\n0 8\n0000000000 65535 f \n${offsets.map(offset=>String(offset).padStart(10,'0')+' 00000 n ').join('\n')}\ntrailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+}
+
+test('cross-page game, printed highlights and local session survive reopening',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  const file={name:'cross-page-study.pdf',mimeType:'application/pdf',buffer:twoPageStudy()};
+  await page.goto('/reader');await page.getByLabel('Choose a PDF to read').setInputFiles(file);
+  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+  await page.getByRole('button',{name:'Load reviewed line'}).click();
+  await page.locator('.reader-move-chip').last().click();
+  await expect(page.locator('.pdf-source-highlight.is-move')).toBeVisible();
+  const printed=await page.locator('.react-pdf__Page__textContent span').first().boundingBox();
+  const marked=await page.locator('.pdf-source-highlight.is-move').boundingBox();
+  expect(Math.abs(printed.y-marked.y)).toBeLessThan(15);
+  await page.locator('.pdf-toolbar').getByRole('button',{name:'Next'}).click();
+  await page.getByRole('button',{name:'Continue previous game'}).click();
+  await expect(page.getByLabel('Review and correct moves')).toHaveValue('e4 e5 Nf3 Nc6 Bb5 a6');
+  await page.getByRole('button',{name:'Load reviewed line'}).click();
+  await expect(page.locator('.reader-move-chip')).toHaveCount(6);
+  await page.locator('.reader-move-chip').last().click();
+  await page.getByRole('dialog',{name:'Choose a variation'}).getByRole('button',{name:'Nf6 \u00B7 Variation',exact:true}).click();
+  await expect(page.getByRole('region',{name:'Book move replay'})).toContainText('6 / 6 plies');
+  await page.getByLabel('Review and correct moves').fill('e4 e5 Nf3 Nc6 Bb5 Nf6');
+  await page.getByRole('button',{name:'Validate corrections'}).click();
+  await expect.poll(()=>page.evaluate(async()=>{
+    const db=await new Promise(resolve=>{const req=indexedDB.open('neurochess-reader');req.onsuccess=()=>resolve(req.result);});
+    return new Promise(resolve=>{const req=db.transaction('documents').objectStore('documents').getAll();req.onsuccess=()=>{const saved=req.result[0];db.close();resolve(saved?.pageNumber===2 && saved?.cursor===6 && saved?.pages?.[2]?.editor==='e4 e5 Nf3 Nc6 Bb5 Nf6');};});
+  })).toBeTruthy();
+  await page.reload();await page.getByLabel('Choose a PDF to read').setInputFiles(file);
+  await expect(page.locator('.pdf-toolbar')).toContainText('Page 2 of 2');
+  await expect(page.getByLabel('Review and correct moves')).toHaveValue('e4 e5 Nf3 Nc6 Bb5 Nf6');
+  await expect(page.getByRole('region',{name:'Book move replay'})).toContainText('6 / 6 plies');
+  await page.getByRole('button',{name:'Forget local reading progress'}).click();
+  await expect(page.getByLabel('Choose a PDF to read')).toBeVisible();
+  await expect.poll(()=>page.evaluate(async()=>{
+    const db=await new Promise(resolve=>{const request=indexedDB.open('neurochess-reader');request.onsuccess=()=>resolve(request.result);});
+    return new Promise(resolve=>{const request=db.transaction('documents').objectStore('documents').count();request.onsuccess=()=>{db.close();resolve(request.result);};});
+  })).toBe(0);
+});
+
+test('separate printed games stay separate and the earlier game remains available',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  await page.goto('/reader');await page.getByLabel('Choose a PDF to read').setInputFiles({name:'separate-games.pdf',mimeType:'application/pdf',buffer:pdfFixture('1.e4 e5 2.Nf3 Nc6 1.d4 d5 2.c4 e6')});
+  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+  await page.getByRole('button',{name:'Load reviewed line'}).click();
+  await page.getByLabel('Choose main line or variation').selectOption('1');
+  await page.getByRole('button',{name:'Load reviewed line'}).click();
+  await page.locator('.reader-move-chip').first().click();
+  await expect(page.getByRole('dialog',{name:'Choose a variation'})).toHaveCount(0);
+  await expect(page.getByLabel('Earlier document games')).toBeVisible();
+  await expect(page.locator('.reader-move-chip').first()).toContainText('d4');
+});
+
+test('selected notation region is cropped before OCR and uses single-line mode',async({page})=>{
+  await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+  let submitted=null;
+  await page.route('**/api/v1/extract-page-image',async route=>{
+    submitted=route.request().postDataBuffer().toString('latin1');
+    await route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{job_id:'region-test',status:'completed',result:{text:'1.e4 e5 2.Nf3 Nc6',text_items:[],ocr_confidence:90}}});
+  });
+  await page.goto('/reader');await page.getByLabel('Choose a PDF to read').setInputFiles({name:'region.pdf',mimeType:'application/pdf',buffer:pdfFixture()});
+  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+  await page.getByRole('button',{name:'Select a move line',exact:true}).click();
+  await page.locator('.pdf-region-selector').scrollIntoViewIfNeeded();
+  const bounds=await page.locator('.pdf-region-selector').boundingBox();
+  await page.mouse.move(bounds.x+3,bounds.y+5);await page.mouse.down();
+  await page.mouse.move(bounds.x+bounds.width*.48,bounds.y+bounds.height*.45);await page.mouse.up();
+  await expect(page.locator('.pdf-source-highlight')).toBeVisible();
+  await expect(page.getByRole('button',{name:'OCR selected region'})).toBeEnabled();
+  await page.getByLabel('Selected OCR layout').selectOption('line');
+  await page.getByRole('button',{name:'OCR selected region'}).click();
+  await expect.poll(()=>submitted).not.toBeNull();
+  expect(submitted).toContain('name="mode"\r\n\r\nline');
+  await expect(page.locator('.reader-move-chip')).toHaveCount(4);
+});
