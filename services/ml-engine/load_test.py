@@ -28,7 +28,7 @@ async def run(base, concurrency=8):
                 response=await client.request('POST' if 'json' in kwargs or 'files' in kwargs else 'GET',path,headers=headers[owner],**kwargs)
                 results[kind].append(((time.perf_counter()-started)*1000,response.status_code))
                 return response
-        # Warm embedding retrieval; token generation is stubbed by test_auth_server.
+        # Warm embedding retrieval; token generation is stubbed by tests.auth_server.
         await request('report-warmup','/api/v1/predict-strategy',json={'opponent_name':player,'context':'warmup'})
         moves=['e2e4','e7e5','g1f3','b8c6','f1b5','a7a6']
         bodies=[]

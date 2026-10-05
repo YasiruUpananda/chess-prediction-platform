@@ -1,6 +1,6 @@
 """Opt-in tests against local Compose services; never calls a paid model.
 
-RUN_INTEGRATION_TESTS=1 python -m unittest test_reliability_integration -v
+RUN_INTEGRATION_TESTS=1 python -m unittest tests.test_reliability_integration -v
 """
 import os
 import hashlib

@@ -8,7 +8,7 @@ import chess
 import main
 import studies
 from database import init_db, connect
-from test_auth_fixture import signed_sessions
+from tests.auth_fixture import signed_sessions
 
 
 @unittest.skipUnless(os.getenv('RUN_INTEGRATION_TESTS') == '1','requires local PostgreSQL')

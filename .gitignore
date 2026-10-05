@@ -36,6 +36,9 @@ yarn-error.log*
 
 # Python generated files
 __pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
 *.dump

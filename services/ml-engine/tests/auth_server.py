@@ -7,7 +7,7 @@ import uvicorn
 import main
 import predict_opponent
 from database import connect
-from test_auth_fixture import signed_sessions
+from tests.auth_fixture import signed_sessions
 
 
 async def fake_report(_self, prompt):
