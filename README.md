@@ -1,5 +1,8 @@
 # Neuro Chess
 
+Reader preservation, identity migration, and regression gates: [READER_PRESERVATION.md](READER_PRESERVATION.md).
+Off-host bucket setup: [BACKUP_SETUP.md](BACKUP_SETUP.md).
+
 Neuro Chess combines opponent move analysis, chess strategy search, and a PDF chess book reader with move extraction. The Vite React app in `frontend/` is the web client. The FastAPI service and ingestion worker live in `services/ml-engine/`.
 
 ## Start locally

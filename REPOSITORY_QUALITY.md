@@ -17,7 +17,7 @@ docker compose build migrate
 docker compose run --rm migrate
 ```
 
-Compose waits for the migration job before API and worker startup. Outside Compose, run `python migrate.py apply` with the database URL configured. Service startup checks the platform migration ledger without creating platform tables or backfilling rows. `python migrate.py check` performs only the readiness check. LangChain still manages its own vector extension, collection, and table bootstrap; moving that library-owned schema into migrations remains follow-up work.
+Compose waits for the migration job before API and worker startup. Outside Compose, run `python migrate.py apply` with the database URL configured. Service startup checks the migration ledger without creating tables or backfilling rows. `python migrate.py check` performs only the readiness check. Vector schema and collection bootstrap now belong to migration 0003; the pinned LangChain adapter performs no DDL. See [READER_PRESERVATION.md](READER_PRESERVATION.md) for runtime roles and identity adoption.
 
 Migrations use an advisory transaction lock, a version/checksum ledger, and one transaction. The initial migration adopts existing tables additively; position-key backfill is recorded once and processes batches of 500. Editing an applied migration fails validation. Add a new numbered migration instead. Roll back application code only to a version compatible with the deployed schema; destructive down migrations are deliberately absent.
 

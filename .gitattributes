@@ -1,1 +1,4 @@
+# PDF cross-reference offsets must survive Windows checkouts unchanged.
+*.pdf binary
+*.png binary
 *.sh text eol=lf

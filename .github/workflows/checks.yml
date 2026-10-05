@@ -24,7 +24,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm run lint && npm test && npm run api:check && npm run build
+      - run: npm run lint && npm test && npm run benchmark:pdf && npm run api:check && npm run build && npm audit --audit-level=high
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test
       - uses: actions/upload-artifact@v4
@@ -62,7 +62,7 @@ jobs:
       - name: Seed only an isolated browser player fixture
         run: >-
           docker compose run --rm backend-tests python -c
-          "from database import connect; db=connect(); conn=db.__enter__(); conn.execute(\"INSERT INTO ingested_games(id,white,black,indexed) VALUES ('ci-browser-fixture','CI Player','CI Opponent',true) ON CONFLICT DO NOTHING\"); db.__exit__(None,None,None)"
+          "from database import connect; db=connect(); conn=db.__enter__(); conn.execute(\"INSERT INTO ingested_games(id,white,black,indexed) VALUES ('ci-browser-fixture','CI Player','CI Opponent',true) ON CONFLICT DO NOTHING\"); conn.execute(\"INSERT INTO players(id,name) VALUES ('name:ci player','CI Player') ON CONFLICT DO NOTHING\"); conn.execute(\"INSERT INTO game_participants(game_id,color,player_id,original_name) VALUES ('ci-browser-fixture','white','name:ci player','CI Player') ON CONFLICT DO NOTHING\"); db.__exit__(None,None,None)"
       - run: docker compose up -d --wait browser-api
       - run: npm ci && npm run build && npx playwright install --with-deps chromium
         working-directory: frontend
