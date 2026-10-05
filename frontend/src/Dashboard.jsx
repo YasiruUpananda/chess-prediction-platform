@@ -1,4 +1,5 @@
 import EvidenceReferences from './EvidenceReferences';
+import PlayerCoverage from './PlayerCoverage';
 import { useEffect, useMemo, useState } from 'react';
 import { useSelector, useDispatch, useStore } from 'react-redux';
 import {
@@ -75,9 +76,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (!playersQuery.data) return;
     const selected = store.getState().chess.opponentName;
-    if (!players.some((player) => player.name === selected)) dispatch(setOpponentName(players[0]?.name || ''));
+    if (!players.some((player) => (player.id || player.name) === selected)) dispatch(setOpponentName(players[0]?.id || players[0]?.name || ''));
   }, [players, playersQuery.data, dispatch, store]);
-  const selectedPlayer = players.find((player) => player.name === opponentName);
+  const selectedPlayer = players.find((player) => (player.id || player.name) === opponentName);
 
   const [context, setContext] = useState('');
   const [moveInput, setMoveInput] = useState('');
@@ -283,9 +284,10 @@ export default function Dashboard() {
                       setEarlyStatistics([]); setReportProgress('');
                     }}>
                     <option value="" disabled>{playersLoading ? 'Loading players…' : 'Choose an indexed player'}</option>
-                    {players.map((player) => <option key={player.name} value={player.name}>{player.name} · {player.games} games</option>)}
+                    {players.map((player) => <option key={player.id || player.name} value={player.id || player.name}>{player.name} · {player.games} games</option>)}
                   </select>
                   {selectedPlayer && <small>{selectedPlayer.games} indexed games available.</small>}
+                  {selectedPlayer?.id && <PlayerCoverage key={selectedPlayer.id} id={selectedPlayer.id} />}
                   {!playersLoading && !players.length && !playersError && <p>No indexed players yet. Ingest a PGN dataset to begin.</p>}
                   {playersError && <p role="alert">{playersError}</p>}
                   <button type="button" className="text-button" disabled={playersLoading || movePending}
@@ -308,7 +310,7 @@ export default function Dashboard() {
                   </select>
                 </div>
                 <button type="submit" disabled={loading || playersLoading || !selectedPlayer} className="primary-button">
-                  <span>{loading ? 'Analyzing...' : 'Generate RAG Strategy'}</span>
+                  <span>{loading ? 'Analyzing...' : 'Generate opponent report'}</span>
                   {!loading && <span aria-hidden="true">→</span>}
                 </button>
               </form>

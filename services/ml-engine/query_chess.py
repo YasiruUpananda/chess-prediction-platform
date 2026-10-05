@@ -1,17 +1,9 @@
-from rag_store import get_vector_store
+"""Player-scoped CLI; arbitrary unfiltered searches are retired."""
+import argparse
+from predict_opponent import factual_statistics, supporting_games
 
-def search_chess_games(query: str, k: int = 2):
-    vector_store = get_vector_store()
-    
-    # Perform similarity search with distance scores
-    results = vector_store.similarity_search_with_score(query, k=k)
-    
-    print(f"\n--- Query: '{query}' ---")
-    for idx, (doc, score) in enumerate(results, 1):
-        print(f"\nResult {idx} (Distance Score: {score:.4f}):")
-        print(f"Content:\n{doc.page_content}")
-        print(f"Metadata: {doc.metadata}")
-
-if __name__ == "__main__":
-    # Test query looking for a specific opponent strategy
-    search_chess_games("Magnus Carlsen attacking lines")
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('player');parser.add_argument('--context',default='');args=parser.parse_args()
+    _,ids,_=factual_statistics(args.player.strip().lower())
+    for game in supporting_games(args.player.strip().lower(),args.context,ids):
+        print(game['id'],game['white'],'vs',game['black']);print(game['pgn'])

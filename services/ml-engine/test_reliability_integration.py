@@ -119,6 +119,8 @@ class IntegrationTests(unittest.TestCase):
                     with self.assertRaises(RuntimeError):
                         worker.process_pgn('retry.pgn')
                     worker.process_pgn('retry.pgn')
+                    Path(folder,'retry.pgn').write_text(text.replace('[White "Test White"]','[Annotator "New export"]\n[White "Test White"]'))
+                    worker.process_pgn('retry.pgn')
                     worker.process_pgn('retry.pgn')
             with connect() as db:
                 self.assertEqual(db.execute('SELECT count(*) FROM player_moves WHERE game_id=%s', (game_id,)).fetchone()[0], 2)

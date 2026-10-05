@@ -90,7 +90,7 @@ test('obsolete move and report responses cannot restore stale results',async({pa
   await page.getByLabel('Play a move (SAN or UCI)').press('Enter');
   await expect(page.getByRole('button',{name:'Play move',exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Reset game'}).click();
-  await page.getByRole('button',{name:'Generate RAG Strategy'}).click();
+  await page.getByRole('button',{name:'Generate opponent report'}).click();
   await page.getByLabel('Opening / Context').fill('Changed context');
   await page.waitForTimeout(800);
   await expect(page.getByText('Cited profile')).toHaveCount(0);
@@ -102,7 +102,7 @@ test('obsolete move and report responses cannot restore stale results',async({pa
 test('report tabs support keyboard navigation and context changes clear reports',async({page})=>{
   await fixture(page); await page.goto('/predict');
   await expect(page.getByLabel('Opponent',{exact:true})).toHaveValue('Alice');
-  await page.getByRole('button',{name:'Generate RAG Strategy'}).click();
+  await page.getByRole('button',{name:'Generate opponent report'}).click();
   await expect(page.getByText('Cited profile')).toBeVisible();
   await expect(page.getByText('Verified statistic: 3 indexed games in this sample')).toBeVisible();
   await expect(page.getByText('AI interpretation · verify against the cited evidence')).toBeVisible();
@@ -146,7 +146,7 @@ test('reader defers PDF tools and supports keyboard study controls',async({page}
   await closeReaderTools(page);await readerPane(page,'Board');
   await page.getByRole('button',{name:'Next move'}).click();
   await closeReaderTools(page);await boardControls(page);
-  const download=page.waitForEvent('download'); await page.getByRole('button',{name:'Export current PGN'}).click();
+  const download=page.waitForEvent('download'); await page.getByRole('button',{name:'Export study PGN'}).click();
   expect((await download).suggestedFilename()).toBe('book-study.pgn');
   await closeReaderTools(page);await boardControls(page);
   await page.getByRole('button',{name:'Flip board'}).click();

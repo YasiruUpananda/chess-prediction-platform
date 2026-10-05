@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import chess.pgn
+from game_identity import game_identity
 
 
 def normalized(name):
@@ -44,10 +45,7 @@ def prepare(inputs, roster, output, country='SRI'):
                     if not matched:
                         totals['without_confirmed_country'] += 1; continue
                     # Header edits and comments do not make the same game new evidence.
-                    identity = json.dumps([normalized(game.headers.get('White','')),normalized(game.headers.get('Black','')),
-                        game.headers.get('Date'),game.headers.get('Round'),game.board().fen(),
-                        [move.uci() for move in game.mainline_moves()]],sort_keys=True)
-                    digest = hashlib.sha256(identity.encode()).hexdigest()
+                    digest = game_identity(game)
                     if digest in seen:
                         totals['duplicates'] += 1; continue
                     seen.add(digest); coverage.update(matched); totals['included'] += 1

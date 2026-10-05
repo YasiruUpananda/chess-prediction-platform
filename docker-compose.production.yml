@@ -1,5 +1,9 @@
 # Data services have no published host ports and live on an internal network.
 services:
+  prometheus:
+    networks: [data]
+  jaeger:
+    networks: [default,data]
   db:
     ports: !reset []
     networks: [data]
@@ -10,6 +14,11 @@ services:
     networks: [data]
   migrate:
     networks: [data]
+    environment:
+      DB_API_PASSWORD: ${DB_API_PASSWORD:?Set a separate DB_API_PASSWORD}
+      DB_INGESTION_PASSWORD: ${DB_INGESTION_PASSWORD:?Set a separate DB_INGESTION_PASSWORD}
+      DB_OCR_PASSWORD: ${DB_OCR_PASSWORD:?Set a separate DB_OCR_PASSWORD}
+      DB_BACKUP_PASSWORD: ${DB_BACKUP_PASSWORD:?Set a separate DB_BACKUP_PASSWORD}
   ml-engine:
     networks: [default, data]
   ml-worker:

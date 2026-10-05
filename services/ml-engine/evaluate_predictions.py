@@ -8,6 +8,7 @@ from datetime import date
 import chess.pgn
 from chess_positions import position_key
 from prediction_model import combine_history_and_heuristic, score_legal_moves
+from game_identity import game_identity, participant_identity
 
 
 def partition_games(games, split):
@@ -44,8 +45,7 @@ def evaluate(path, split='chronological', strengths=(5, 10, 20, 40, 80)):
         while (game := chess.pgn.read_game(source)) is not None:
             if game.errors:
                 continue
-            identity = game.board().fen() + " " + " ".join(m.uci() for m in game.mainline_moves())
-            digest = hashlib.sha256(identity.encode()).hexdigest()
+            digest = game_identity(game)
             games.setdefault(digest, game)
     train = collections.defaultdict(collections.Counter)
     partitions, excluded = partition_games(games, split)
@@ -54,8 +54,8 @@ def evaluate(path, split='chronological', strengths=(5, 10, 20, 40, 80)):
         for game in selected:
             board = game.board()
             for move in game.mainline_moves():
-                player = game.headers.get('White' if board.turn else 'Black', 'Unknown').strip().lower()
-                rows.append((board.copy(), move.uci(), player, game.headers.get('ECO', 'Unknown')))
+                player = participant_identity(game.headers,'White' if board.turn else 'Black')
+                rows.append((board.copy(stack=False), move.uci(), player, game.headers.get('ECO', 'Unknown')))
                 board.push(move)
         return rows
     for game in partitions['train']:

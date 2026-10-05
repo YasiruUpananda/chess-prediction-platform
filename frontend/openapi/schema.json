@@ -313,6 +313,48 @@
         ]
       }
     },
+    "/api/v1/players/{player_id}/coverage": {
+      "get": {
+        "summary": "Player Coverage",
+        "operationId": "player_coverage_api_v1_players__player_id__coverage_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Player Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/predict-move": {
       "post": {
         "summary": "Predict Move",
@@ -1367,6 +1409,17 @@
           "games": {
             "type": "integer",
             "title": "Games"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
           }
         },
         "type": "object",

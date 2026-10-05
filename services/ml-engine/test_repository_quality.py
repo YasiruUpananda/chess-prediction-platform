@@ -91,7 +91,7 @@ class RepositoryQualityTests(unittest.TestCase):
             self.assertEqual(len(stat['game_ids']), 6)
 
     def test_reference_pages_reject_a_stale_report_version(self):
-        with patch.object(reports, 'factual_statistics', return_value=([], [], 'new')), \
+        with patch.object(reports, 'cached_statistics', return_value=([], [], 'new')), \
              patch.object(reports, 'connect') as connection:
             with self.assertRaises(ValueError):
                 reports.reference_page('alice', 'any', 'sample', 'old', 0, 25)
@@ -132,7 +132,7 @@ class RepositoryQualityTests(unittest.TestCase):
                 db.execute("INSERT INTO ingested_games(id,white,black) VALUES ('keep','Alice','Bob')")
                 migrate.apply(db)
                 migrate.check_schema(db)
-                self.assertEqual(db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0], 2)
+                self.assertEqual(db.execute('SELECT count(*) FROM schema_migrations').fetchone()[0], len(migrate.definitions()))
                 self.assertEqual(db.execute('SELECT count(*) FROM ingested_games').fetchone()[0], 1)
                 db.execute("UPDATE schema_migrations SET checksum='tampered' WHERE version='0001_platform'")
                 with self.assertRaises(RuntimeError): migrate.apply(db)

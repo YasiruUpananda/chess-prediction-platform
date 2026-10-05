@@ -147,6 +147,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/players/{player_id}/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Player Coverage */
+        get: operations["player_coverage_api_v1_players__player_id__coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/predict-move": {
         parameters: {
             query?: never;
@@ -562,6 +579,8 @@ export interface components {
             name: string;
             /** Games */
             games: number;
+            /** Id */
+            id?: string | null;
         };
         /** PlayersResponse */
         PlayersResponse: {
@@ -954,6 +973,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlayersResponse"];
+                };
+            };
+        };
+    };
+    player_coverage_api_v1_players__player_id__coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

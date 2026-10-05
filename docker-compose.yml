@@ -81,6 +81,10 @@ services:
     restart: "no"
     environment:
       WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      DB_API_PASSWORD: ${DB_API_PASSWORD:-${POSTGRES_PASSWORD}}
+      DB_INGESTION_PASSWORD: ${DB_INGESTION_PASSWORD:-${POSTGRES_PASSWORD}}
+      DB_OCR_PASSWORD: ${DB_OCR_PASSWORD:-${POSTGRES_PASSWORD}}
+      DB_BACKUP_PASSWORD: ${DB_BACKUP_PASSWORD:-${POSTGRES_PASSWORD}}
     depends_on:
       db:
         condition: service_healthy
@@ -95,8 +99,8 @@ services:
     ports:
       - "${ML_ENGINE_PORT:-8000}:8000"
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
-      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      DATABASE_URL: postgresql+psycopg://neuro_api:${DB_API_PASSWORD:-${POSTGRES_PASSWORD}}@db:5432/${POSTGRES_DB:-chessrag}
+      WORKER_DATABASE_URL: postgresql://neuro_api:${DB_API_PASSWORD:-${POSTGRES_PASSWORD}}@db:5432/${POSTGRES_DB:-chessrag}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
@@ -156,8 +160,8 @@ services:
     cpus: ${INGESTION_CPUS:-1}
     command: python worker.py
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
-      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      DATABASE_URL: postgresql+psycopg://neuro_ingestion:${DB_INGESTION_PASSWORD:-${POSTGRES_PASSWORD}}@db:5432/${POSTGRES_DB:-chessrag}
+      WORKER_DATABASE_URL: postgresql://neuro_ingestion:${DB_INGESTION_PASSWORD:-${POSTGRES_PASSWORD}}@db:5432/${POSTGRES_DB:-chessrag}
       RABBITMQ_URL: amqp://neuro_chess:${RABBITMQ_PASSWORD}@rabbitmq:5672/
       PGN_DATA_DIR: /app/data
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -192,7 +196,7 @@ services:
     mem_limit: 768m
     cpus: 1
     environment:
-      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      WORKER_DATABASE_URL: postgresql://neuro_ocr:${DB_OCR_PASSWORD:-${POSTGRES_PASSWORD}}@db:5432/${POSTGRES_DB:-chessrag}
       OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-45}
       OCR_MAX_PIXELS: ${OCR_MAX_PIXELS:-16000000}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
@@ -219,9 +223,16 @@ services:
       target: test
     restart: "no"
     ports: []
+    volumes:
+      - ./services/ml-engine/data:/app/data:ro
+      - modelcache:/root/.cache/huggingface
+      - ./frontend/benchmarks/pdf/documents:/pdfcorpus:ro
     healthcheck:
       disable: true
-    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "test_product", "test_measurements", "test_repository_quality", "-v"]
+    environment:
+      WORKER_DATABASE_URL: postgresql://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-chess}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-chessrag}
+    command: ["python", "-m", "unittest", "test_reliability", "test_prediction_quality", "test_strategy_reports", "test_pdf_reader", "test_reliability_integration", "test_backend_efficiency", "test_backend_integration", "test_telemetry", "test_vector_search", "test_product", "test_measurements", "test_repository_quality", "test_identity", "-v"]
 
   browser-api:
     <<: *api-service
@@ -245,8 +256,8 @@ services:
     restart: unless-stopped
     environment:
       PGHOST: db
-      PGUSER: ${POSTGRES_USER:-chess}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGUSER: neuro_backup
+      PGPASSWORD: ${DB_BACKUP_PASSWORD:-${POSTGRES_PASSWORD}}
       PGDATABASE: ${POSTGRES_DB:-chessrag}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
     entrypoint: ["sh", "/scripts/backup.sh"]
@@ -266,6 +277,7 @@ services:
       retries: 3
 
 volumes:
+  backupuploadstate:
   prometheusdata:
   pgdata:
   rabbitmqdata:

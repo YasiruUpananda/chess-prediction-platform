@@ -22,7 +22,7 @@ test('report references paginate without bloating the report and reject stale ev
     return route.fulfill({status:404,headers,json:{detail:'Unexpected request'}});
   });
   await page.goto('/predict');await expect(page.getByLabel('Opponent',{exact:true})).toHaveValue('Alice');
-  await page.getByRole('button',{name:'Generate RAG Strategy'}).click();
+  await page.getByRole('button',{name:'Generate opponent report'}).click();
   await expect(page.getByText('Supported qualitative interpretation',{exact:true})).toBeVisible();
   await page.getByText('Source game references',{exact:true}).click();
   await expect(page.getByText('Showing 6 sample references of 60 games.')).toBeVisible();

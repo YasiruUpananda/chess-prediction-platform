@@ -8,8 +8,30 @@ MIGRATIONS = Path(__file__).with_name('migrations')
 
 def definitions():
     sql = (MIGRATIONS / '0001_platform.sql').read_text(encoding='utf8')
+    vector_sql=(MIGRATIONS / '0003_vectors_identity.sql').read_text(encoding='utf8')
     return [('0001_platform', hashlib.sha256(sql.encode()).hexdigest(), sql),
-            ('0002_position_keys', 'canonical-legal-ep-v1-batched', None)]
+            ('0002_position_keys', 'canonical-legal-ep-v1-batched', None),
+            ('0003_vectors_identity',hashlib.sha256(vector_sql.encode()).hexdigest(),vector_sql),
+            ('0004_game_identity_backfill','canonical-headers-v1',None)]
+
+def backfill_games(db):
+    import io
+    import chess.pgn
+    from game_identity import game_identity
+    from player_identity import register_game
+    last=''
+    while True:
+        rows=db.execute('SELECT g.id,e.document FROM ingested_games g JOIN langchain_pg_embedding e ON e.id=g.id WHERE g.canonical_id IS NULL AND g.id>%s ORDER BY g.id LIMIT 500',(last,)).fetchall()
+        if not rows: return
+        for identity,text in rows:
+            last=identity
+            game=chess.pgn.read_game(io.StringIO(text))
+            if game is None or game.errors: continue
+            canonical=game_identity(game)
+            previous=db.execute('SELECT id FROM ingested_games WHERE canonical_id=%s AND duplicate_of IS NULL',(canonical,)).fetchone()
+            db.execute('UPDATE ingested_games SET canonical_id=%s,duplicate_of=%s,indexed=CASE WHEN %s::text IS NULL THEN indexed ELSE false END,played_date=%s,event=%s WHERE id=%s',
+                (canonical,previous[0] if previous else None,previous[0] if previous else None,game.headers.get('Date'),game.headers.get('Event'),identity))
+            register_game(db,identity,game)
 
 
 def backfill_positions(db):
@@ -54,8 +76,10 @@ def apply(db):
             continue
         if sql:
             db.execute(sql)
-        else:
+        elif version=='0002_position_keys':
             backfill_positions(db)
+        else:
+            backfill_games(db)
         db.execute('INSERT INTO schema_migrations(version,checksum) VALUES (%s,%s)', (version, checksum))
         print(f'Applied {version}')
 
@@ -68,5 +92,8 @@ if __name__ == '__main__':
     try:
         with connect() as db:
             (apply if args.command == 'apply' else check_schema)(db)
+            if args.command=='apply':
+                from database_roles import provision
+                provision(db)
     finally:
         close_pool()

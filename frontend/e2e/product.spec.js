@@ -60,7 +60,7 @@ test('saved study restores game history and report export preserves citations',a
   await page.reload();
   await page.getByRole('button',{name:'Open study Opening notes'}).click();
   await expect(page.getByText(/Game history \/ PGN \(2 plies\)/)).toBeVisible();
-  await page.getByRole('button',{name:'Generate RAG Strategy'}).click();
+  await page.getByRole('button',{name:'Generate opponent report'}).click();
   await expect(page.getByText('Cited claim',{exact:true})).toBeVisible();
   const downloadPromise=page.waitForEvent('download');
   await page.getByRole('button',{name:'Export report',exact:true}).click();

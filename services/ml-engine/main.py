@@ -258,7 +258,7 @@ def find_historical_move_counts(player_name, fen):
         rows = db.execute("""SELECT move_played, count(*) FROM (
             SELECT DISTINCT ON (p.game_id) p.move_played FROM player_moves p
             JOIN ingested_games g ON g.id=p.game_id
-            WHERE g.indexed AND lower(trim(p.player_name))=%s AND p.position_key=%s
+            WHERE g.indexed AND player_matches(p.player_id,p.player_name,%s) AND p.position_key=%s
             ORDER BY p.game_id,p.ply
         ) samples GROUP BY move_played""", (player_name.strip().casefold(), key)).fetchall()
     return dict(rows)
@@ -310,6 +310,7 @@ def operational_status(_user: dict[str, Any] = Depends(require_ingestion_permiss
 class PlayerSummary(BaseModel):
     name: str
     games: int
+    id: Optional[str] = None
 
 class PlayersResponse(BaseModel):
     players: list[PlayerSummary]
@@ -317,11 +318,22 @@ class PlayersResponse(BaseModel):
 @app.get("/api/v1/players", response_model=PlayersResponse)
 def available_players(_user: dict[str, Any] = Depends(require_asgardeo_user)):
     with connect() as db:
-        rows = db.execute("""SELECT min(name), count(DISTINCT id) FROM (
-            SELECT id,trim(white) AS name FROM ingested_games WHERE indexed
-            UNION ALL SELECT id,trim(black) AS name FROM ingested_games WHERE indexed
-        ) players WHERE name NOT IN ('Unknown','?','') GROUP BY lower(name) ORDER BY lower(name)""").fetchall()
-    return {"players": [{"name": name, "games": count} for name, count in rows]}
+        rows = db.execute("""SELECT p.name,count(DISTINCT gp.game_id),p.id FROM players p
+          JOIN game_participants gp ON gp.player_id=p.id JOIN ingested_games g ON g.id=gp.game_id
+          WHERE g.indexed AND p.name NOT IN ('Unknown','?','') GROUP BY p.id,p.name ORDER BY lower(p.name),p.id""").fetchall()
+    return {"players": [{"name": name, "games": count,'id':identity} for name, count,identity in rows]}
+
+@app.get('/api/v1/players/{player_id}/coverage')
+def player_coverage(player_id: str, _user=Depends(require_asgardeo_user)):
+    with connect() as db:
+        player=db.execute('SELECT name,fide_id,federation FROM players WHERE id=%s',(player_id,)).fetchone()
+        if not player: raise HTTPException(404,detail='Player not found.')
+        rows=db.execute('''SELECT gp.color,g.played_date,g.event,count(*) FROM game_participants gp
+          JOIN ingested_games g ON g.id=gp.game_id WHERE g.indexed AND gp.player_id=%s
+          GROUP BY gp.color,g.played_date,g.event ORDER BY g.played_date DESC LIMIT 200''',(player_id,)).fetchall()
+    return {'name':player[0],'fide_id':player[1],'federation':player[2],
+      'groups':[{'color':side,'date':date,'event':event,'games':count} for side,date,event,count in rows],
+      'limit':200}
 
 
 @app.post("/api/v1/predict-move", response_model=MovePredictionResponse)
