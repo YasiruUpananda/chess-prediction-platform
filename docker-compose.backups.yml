@@ -1,0 +1,44 @@
+# Opt-in off-host upload and scheduled disposable restore checks.
+services:
+  backup-upload:
+    image: amazon/aws-cli:2.37.9
+    profiles: [offsite-backup]
+    restart: unless-stopped
+    entrypoint: [sh,/scripts/upload-backup.sh]
+    environment:
+      BACKUP_S3_URI: ${BACKUP_S3_URI:?Set BACKUP_S3_URI}
+      AWS_ACCESS_KEY_ID: ${BACKUP_ACCESS_KEY_ID:?Set BACKUP_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_SECRET_ACCESS_KEY:?Set BACKUP_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${BACKUP_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: ${BACKUP_ENDPOINT_URL:-}
+    volumes:
+      - backups:/backups:ro
+      - backupuploadstate:/upload-state
+      - ./scripts/upload-backup.sh:/scripts/upload-backup.sh:ro
+    healthcheck:
+      test: [CMD-SHELL,"test -f /upload-state/last-success && test $$(($$(date +%s)-$$(cat /upload-state/last-success))) -lt 90000"]
+      interval: 60s
+      retries: 3
+  backup-verify:
+    image: postgres:16-alpine
+    profiles: [offsite-backup]
+    restart: unless-stopped
+    entrypoint: [sh,/scripts/scheduled-restore.sh]
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-chess}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-chessrag}
+      BACKUP_VERIFY_INTERVAL_SECONDS: ${BACKUP_VERIFY_INTERVAL_SECONDS:-604800}
+    volumes:
+      - backups:/backups:ro
+      - ./scripts/scheduled-restore.sh:/scripts/scheduled-restore.sh:ro
+      - ./scripts/verify-backup.sh:/scripts/verify-backup.sh:ro
+    healthcheck:
+      test: [CMD-SHELL,"test -f /tmp/restore-success && test $$(($$(date +%s)-$$(cat /tmp/restore-success))) -lt $$(($$BACKUP_VERIFY_INTERVAL_SECONDS+300))"]
+      interval: 60s
+      retries: 3
+    networks: [data]
+networks:
+  data:
+    internal: true

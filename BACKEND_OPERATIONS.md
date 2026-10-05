@@ -113,7 +113,8 @@ the [pgvector indexing and filtering guide](https://github.com/pgvector/pgvector
 
 ```powershell
 docker compose --profile backup up -d db-backup
-docker compose exec db-backup sh /scripts/verify-backup.sh
+# Restore verification uses the dedicated administrative checker.
+# See BACKUP_SETUP.md for its configuration and schedule.
 ```
 
 The backup profile runs custom-format `pg_dump` immediately and every 24 hours
