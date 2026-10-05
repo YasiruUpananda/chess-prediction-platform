@@ -100,7 +100,7 @@ test('custom font characters can be confirmed as pieces and recover all twenty p
   await expect(page.getByLabel('Extracted symbol “X”', {exact:false})).toHaveValue('N');
   await expect(page.getByLabel('Extracted symbol “Y”', {exact:false})).toHaveValue('B');
   await readerTools(page);
-  await expect(page.getByRole('img',{name:/Printed X symbol in font/})).toBeVisible();
+  await expect(page.getByRole('dialog',{name:'Extraction tools',exact:true}).getByRole('img',{name:/Printed X symbol in font/})).toBeVisible();
   await readerTools(page);
   await page.getByLabel('Extracted symbol “Z”', {exact:false}).selectOption('R');
   await readerTools(page);

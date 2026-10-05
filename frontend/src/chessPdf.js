@@ -2,7 +2,7 @@ import { Chess } from 'chess.js';
 /** @typedef {{san:string,number?:number,turn?:string,comments?:string[]}} NotationStep */
 /** @typedef {{rootId:number,steps:NotationStep[],label:string}} WorkingAnchor */
 /** @typedef {{id:number,rootId:number,steps:NotationStep[],variation:boolean,parentSteps:NotationStep[]|null,hasOwnMoves:boolean,anchorOptions?:WorkingAnchor[]}} WorkingLine */
-export const EXTRACTION_VERSION = 'layout-document-v7';
+export const EXTRACTION_VERSION = 'layout-document-v8-token-sources';
 const SAN = /^(?:O-O(?:-O)?|[KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](?:=[QRBN])?[+#]?)$/;
 const UNKNOWN_GLYPH = /[\uFFFD\uE000-\uF8FF¤]/;
 const unreadableMove = (token) => UNKNOWN_GLYPH.test(token) || (!SAN.test(token) && /^[^\s]+[a-h][1-8][+#]?$/.test(token));
@@ -72,7 +72,7 @@ export function normalizeChessText(text) {
 /** @param {number|null} page */
 export function textBlocks(items, pageWidth, page = null) {
   const positioned = items.filter((item) => item.str?.trim() && item.transform)
-    .map((item) => ({ text: item.str, rawText: item.str, page, fontSize: Math.hypot(item.transform[2], item.transform[3]), fontName: item.fontName || 'unknown', hasEOL: Boolean(item.hasEOL), transform: [...item.transform], x: item.transform[4], y: item.transform[5],
+    .map((item, index) => ({ tokenId: item.tokenId || `${page ?? 'ocr'}:${index}:${item.transform[4]}:${item.transform[5]}`, text: item.str, rawText: item.str, page, fontSize: Math.hypot(item.transform[2], item.transform[3]), fontName: item.fontName || 'unknown', hasEOL: Boolean(item.hasEOL), transform: [...item.transform], x: item.transform[4], y: item.transform[5],
       width: item.width || 0, height: Math.abs(item.height || item.transform[3] || 10) }));
   const left = positioned.filter((item) => item.x + item.width < pageWidth * .52);
   const right = positioned.filter((item) => item.x > pageWidth * .48);
@@ -162,12 +162,22 @@ export function locateMoves(moves, items, mappings={}) {
       const item=items[i];
       /** @type {Record<string,string>} */
       const map={};
-      for(const [key,piece] of Object.entries(mappings)) {const [font,glyph]=JSON.parse(key);if(font===item.fontName)map[glyph]=piece;}
-      const text=applyPieceMappings(normalizeChessText(item.text),map);
+      for(const [key,piece] of Object.entries(mappings)) {const [font,glyph]=JSON.parse(key);if(font===fontIdentity(item.fontName))map[glyph]=piece;}
+      const text=map[item.text.trim()] || applyPieceMappings(normalizeChessText(item.text),map);
       const index=text.indexOf(san,i===run?offset:0);
       if(index>=0) {
         run=i;offset=index+san.length;
         return {...item,x:item.x+item.width*index/Math.max(1,text.length),width:item.width*san.length/Math.max(1,text.length),approximate:true};
+      }
+      const next=items[i+1];
+      if(next && /^[KQRBN]$/.test(text.trim()) && san.startsWith(text.trim()) &&
+         Math.abs(item.y-next.y)<Math.max(item.height,next.height)*.5 &&
+         next.x-(item.x+item.width)<Math.max(item.height,2)) {
+        const destination=normalizeChessText(next.text).trim();
+        if(destination.startsWith(san.slice(1))) {
+          run=i+1;offset=san.length-1;
+          return {...item,width:Math.max(item.width,next.x+next.width-item.x),tokenIds:[item.tokenId,next.tokenId],approximate:true};
+        }
       }
     }
     return null;

@@ -1,9 +1,9 @@
 const DB='neurochess-reader';
-const VERSION=1;
+const VERSION=2;
 function database() {
   return new Promise((resolve,reject)=>{
     const request=indexedDB.open(DB,VERSION);
-    request.onupgradeneeded=()=>request.result.createObjectStore('documents');
+    request.onupgradeneeded=()=>{if(!request.result.objectStoreNames.contains('documents'))request.result.createObjectStore('documents');};
     request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
   });
 }
@@ -28,5 +28,16 @@ export async function deleteSession(key) {
   try {await new Promise((resolve,reject)=>{
     const transaction=db.transaction('documents','readwrite');transaction.objectStore('documents').delete(key);
     transaction.oncomplete=resolve;transaction.onerror=()=>reject(transaction.error);
+  });} finally {db.close();}
+}
+
+export async function listSessions(owner) {
+  const db=await database();
+  try {return await new Promise((resolve,reject)=>{
+    const transaction=db.transaction('documents'),store=transaction.objectStore('documents');
+    const request=store.openCursor(),documents=[];
+    request.onsuccess=()=>{const cursor=request.result;if(!cursor){resolve(documents.sort((a,b)=>b.updatedAt-a.updatedAt));return;}
+      if(String(cursor.key).startsWith(owner+':'))documents.push({key:cursor.key,...cursor.value});cursor.continue();};
+    request.onerror=()=>reject(request.error);
   });} finally {db.close();}
 }

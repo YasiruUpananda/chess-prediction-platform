@@ -1,0 +1,33 @@
+import {test,expect} from '@playwright/test';
+import {readerPane} from './readerHelpers';
+import {readFile} from 'node:fs/promises';
+test('parser upgrade preserves corrected pages, exploration, full-tree PGN and library',async({page})=>{
+ await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
+ await page.goto('/reader');
+ await page.getByLabel('Choose a PDF to read').setInputFiles('benchmarks/pdf/documents/commentary.pdf');
+ await readerPane(page,'Board');
+ await expect(page.getByRole('button',{name:'Load reviewed line',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Load reviewed line',exact:true}).click();
+ await page.getByText('More board controls',{exact:true}).click();
+ await page.getByLabel('Play a move (SAN or UCI)').fill('d4');
+ await page.getByRole('button',{name:'Play move',exact:true}).click();
+ await expect(page.getByText('Exploring your variation. The book line is preserved.')).toBeVisible();
+ const downloadPromise=page.waitForEvent('download');
+ await page.getByRole('button',{name:'Export study PGN'}).click();
+ const download=await downloadPromise,content=await readFile(await download.path(),'utf8');
+ expect(content).toContain('Nf6');expect(content).toContain('d4');expect(content).toContain('Nc6');
+ await page.getByRole('button',{name:'Return to book line'}).click();
+ await readerPane(page,'Notes');
+ await page.getByLabel('Review and correct moves').fill('1.e4 e5 2.Nf3 Nc6 3.Bb5');
+ await page.getByRole('button',{name:'Validate corrections',exact:true}).click();
+ await expect.poll(()=>page.evaluate(async()=>{
+  const db=await new Promise(resolve=>{const request=indexedDB.open('neurochess-reader');request.onsuccess=()=>resolve(request.result);});
+  return new Promise(resolve=>{const tx=db.transaction('documents','readwrite');const request=tx.objectStore('documents').openCursor();let changed=false;
+   request.onsuccess=()=>{const cursor=request.result;if(cursor && cursor.value.pages?.[1]?.reviewed){cursor.update({...cursor.value,extractionVersion:'old-parser'});changed=true;}};
+   tx.oncomplete=()=>{db.close();resolve(changed);};});
+ })).toBeTruthy();
+ await page.reload();await page.getByLabel('Choose a PDF to read').setInputFiles('benchmarks/pdf/documents/commentary.pdf');
+ await readerPane(page,'Notes');await expect(page.getByLabel('Review and correct moves')).toHaveValue('1.e4 e5 2.Nf3 Nc6 3.Bb5');
+ await page.getByRole('button',{name:'Choose another PDF'}).click();
+ await expect(page.getByRole('region',{name:'Recent books',exact:true})).toContainText('commentary.pdf');
+});

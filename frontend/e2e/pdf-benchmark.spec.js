@@ -2,11 +2,11 @@ import {readerPane,readerTools,closeReaderTools} from './readerHelpers.js';
 import {test,expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 import process from 'node:process';
+import {resolve,dirname} from 'node:path';
 import {gradePdfLines} from '../src/pdfBenchmark.js';
-const manifest=process.env.PDF_BENCHMARK_MANIFEST;
-const cases=manifest?JSON.parse(readFileSync(manifest,'utf8')).cases:[];
+const manifest=process.env.PDF_BENCHMARK_MANIFEST || 'benchmarks/pdf/documents/manifest.json';
+const cases=JSON.parse(readFileSync(manifest,'utf8')).cases.map(item=>({...item,file:resolve(dirname(manifest),item.file)}));
 test('real PDF corpus complete-line and variation-attachment benchmark',async({page},testInfo)=>{
-  test.skip(!manifest,'Set PDF_BENCHMARK_MANIFEST to a local, manually labelled real-book corpus.');
   test.setTimeout(180000*Math.max(1,cases.length));
   const results=[];
   for(const sample of cases) {
@@ -70,4 +70,7 @@ test('real PDF corpus complete-line and variation-attachment benchmark',async({p
   await testInfo.attach('pdf-benchmark.json',{body:JSON.stringify({kind:'local PDF corpus',results,
     completeLineAccuracy:totals.lines?totals.complete/totals.lines:null,
     variationAttachmentAccuracy:totals.branches?totals.attached/totals.branches:null},null,2),contentType:'application/json'});
+  expect(totals.lines,'Corpus must include labelled move lines').toBeGreaterThan(0);
+  expect(totals.complete/totals.lines).toBeGreaterThanOrEqual(.95);
+  if(totals.branches)expect(totals.attached/totals.branches).toBeGreaterThanOrEqual(.95);
 });

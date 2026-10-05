@@ -81,3 +81,36 @@ export function bookMoveLabels(initialFen, moves, uci=false) {
     return `${number}${turn==='w'?'.':'...'} ${move.san}`;
   });
 }
+
+// Exploration adds a sibling; printed continuations remain available.
+export function addStudyMove(root, initialFen, path, move) {
+  const tree = root ? structuredClone(root) : {fen:initialFen,children:[]};
+  const board = new Chess(initialFen);
+  let node = tree;
+  for (const uci of [...path, move]) {
+    const played = board.move(typeof uci === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)
+      ? {from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]} : uci);
+    const value = played.from+played.to+(played.promotion || '');
+    let child = node.children.find(item=>item.uci===value);
+    if (!child) {child={uci:value,san:played.san,fen:board.fen(),parentFen:node.fen,children:[],sources:[],comments:[],mainLine:false,userVariation:true};node.children.push(child);}
+    node=child;
+  }
+  return {tree, moves:board.history({verbose:true}).map(item=>item.from+item.to+(item.promotion || ''))};
+}
+
+export function bookMainPath(root) {
+  const first=root?.children.find(child=>child.mainLine) || root?.children[0];
+  return first ? continuation(first) : [];
+}
+
+export function exportBookPgn(root, initialFen) {
+  const escaped = text=>String(text).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+  function emit(node) {
+    if(!node.children.length)return '';
+    const main=node.children.find(child=>child.mainLine) || node.children[0];
+    const board=new Chess(node.fen);
+    const move=child=>`${board.moveNumber()}${board.turn()==='w'?'.':'...'} ${child.san}${child.comments?.length?' {'+child.comments.join(' ').replace(/[{}]/g,'')+'}':''}`;
+    return `${move(main)} ${node.children.filter(child=>child!==main).map(child=>`(${move(child)} ${emit(child)})`).join(' ')} ${emit(main)}`.trim();
+  }
+  return `[Event "NeuroChess book study"]\n[Result "*"]\n[SetUp "1"]\n[FEN "${escaped(initialFen)}"]\n\n${root?emit(root):''} *`;
+}

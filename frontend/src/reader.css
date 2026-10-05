@@ -80,6 +80,12 @@
 .reader-shell:fullscreen { overflow:auto;padding:20px;background:var(--surface); }
 .reader-shell:fullscreen .reader-document { height:calc(100dvh - 180px); }
 .sr-only { position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%); }
+.reader-workflow {display:flex;gap:24px;flex-wrap:wrap;padding:12px 20px;color:var(--muted);font-size:15px;}
+.reader-library {padding:16px 0;}
+.reader-library ul {list-style:none;padding:0;display:grid;gap:12px;}
+.reader-library li {display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.reader-library span {color:var(--muted);}
+.reader-variation-row {padding-left:18px;border-left:2px solid var(--gold);margin-left:12px;}
 @media(max-width:1000px) {
   .reader-shell { padding:18px 14px; }
   .reader-title-row { align-items:flex-start;flex-direction:column;margin-bottom:16px; }

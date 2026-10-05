@@ -1,0 +1,9 @@
+{
+  "kind":"CC0 source-authored PDF integration fixtures, not a production-book accuracy claim",
+  "cases":[
+    {"name":"commentary and prose alternative","file":"commentary.pdf","page":1,"expected":[["e4","e5","Nf3","Nc6"],["e4","e5","Nf3","Nf6"]],"attachments":[{"line":1,"parent":0,"prefix":["e4","e5","Nf3"]}]},
+    {"name":"two columns","file":"columns.pdf","page":1,"expected":[["e4","e5","Nf3","Nc6","Bb5","a6"],["d4","d5","c4","e6","Nc3","Nf6"]]},
+    {"name":"page continuation with retained alternatives","file":"continuation.pdf","page":2,"contextPages":[1],"expected":[["e4","e5","Nf3","Nc6","Bb5","a6"],["e4","e5","Bc4","Nc6"],["e4","e5","Nf3","Nc6","Bb5","Nf6"]],"attachments":[{"line":2,"parent":0,"prefix":["e4","e5","Nf3","Nc6","Bb5"]}]},
+    {"name":"printed Type3 knight font","file":"figurine.pdf","page":1,"pieces":{"X":"N"},"expected":[["e4","e5","Nf3","Nc6"]]}
+  ]
+}
