@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, Suspense } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { useSession } from './sessionContext';
+import { useSession } from '../features/auth/sessionContext';
 import PageBoundary from './PageBoundary';
 
 const links = [{to:'/',label:'Home'}, {to:'/predict',label:'Prediction engine'}, {to:'/reader',label:'Book reader'}];

@@ -1,11 +1,11 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
-import './index.css'
-import './designSystem.css'
-import './App.css'
-import './brand.css'
-import { startBrowserVitals } from './browserVitals'
+import App from './app/App.jsx'
+import './styles/index.css'
+import './styles/designSystem.css'
+import './styles/App.css'
+import './styles/brand.css'
+import { startBrowserVitals } from './lib/browserVitals'
 
 startBrowserVitals().catch(() => {})
 

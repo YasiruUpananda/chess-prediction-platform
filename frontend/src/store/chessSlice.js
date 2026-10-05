@@ -7,7 +7,7 @@ const initialState = {
   pgn: '',
   revision: 0,
   opponentName: '',
-  strategyAnalysis: /** @type {import('../apiClient').StrategyResponse|null} */ (null),
+  strategyAnalysis: /** @type {import('../lib/apiClient').StrategyResponse|null} */ (null),
   supportingGames: 0,
   availableGames: 0,
   predictedMove: null,

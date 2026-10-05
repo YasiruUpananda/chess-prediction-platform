@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AUTH_RECOVERY_EVENT, AUTH_RECOVERY_KEY } from './api';
+import { AUTH_RECOVERY_EVENT, AUTH_RECOVERY_KEY } from '../../lib/api';
 import { useSession } from './sessionContext';
 
 export default function AuthenticationRecovery() {

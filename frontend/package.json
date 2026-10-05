@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "serve": "node scripts/serve-production.mjs",
-    "test": "node --test src/*.test.js",
+    "test": "node scripts/test.mjs",
     "test:browser": "npm run build && playwright test",
     "benchmark:pdf": "node scripts/benchmark-pdf.mjs",
     "benchmark:pdf:books": "playwright test e2e/pdf-benchmark.spec.js --project desktop"

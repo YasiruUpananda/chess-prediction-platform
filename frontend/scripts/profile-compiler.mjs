@@ -4,8 +4,9 @@ import { chromium } from '@playwright/test';
 import { existsSync } from 'node:fs';
 
 const baseline = new URL('../performance/compiler-baseline.tsx', import.meta.url);
-const source = await readFile(new URL('../src/ReportContent.tsx', import.meta.url), 'utf8');
-await writeFile(baseline, source.replace("'./generated/api'", "'../src/generated/api'")
+const source = await readFile(new URL('../src/features/prediction/ReportContent.tsx', import.meta.url), 'utf8');
+await writeFile(baseline, source.replace("'../../generated/api'", "'../src/generated/api'")
+  .replace("'./statisticText'", "'../src/features/prediction/statisticText'")
   .replace("'use memo'", "'use no memo'"));
 let server, browser;
 try {

@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {authenticatedRequest,friendlyError} from './api';
+import {authenticatedRequest,friendlyError} from '../../lib/api';
 
 export default function EvidenceReferences({player,color,version,statistic}) {
   const [open,setOpen]=useState(false);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequestGate } from './requestGate.js';
-import reducer, { applyMovePrediction, setFen, setOpponentName } from './store/chessSlice.js';
+import reducer, { applyMovePrediction, setFen, setOpponentName } from '../store/chessSlice.js';
 
 test('superseded and cancelled requests cannot apply results', () => {
   const gate = createRequestGate();

@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {requestJson,friendlyError} from './api';
+import {requestJson,friendlyError} from '../../lib/api';
 type Coverage={name:string;fide_id:string|null;federation:string|null;groups:{color:string;date:string|null;event:string|null;games:number}[];limit:number};
 export default function PlayerCoverage({id}:{id?:string|null}) {
  const [result,setResult]=useState<Coverage|null>(null),[error,setError]=useState('');

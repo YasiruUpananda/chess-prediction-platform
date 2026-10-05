@@ -3,7 +3,7 @@ import {test,expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 import process from 'node:process';
 import {resolve,dirname} from 'node:path';
-import {gradePdfLines} from '../src/pdfBenchmark.js';
+import {gradePdfLines} from '../src/features/reader/pdfBenchmark.js';
 const manifest=process.env.PDF_BENCHMARK_MANIFEST || 'benchmarks/pdf/documents/manifest.json';
 const cases=JSON.parse(readFileSync(manifest,'utf8')).cases.map(item=>({...item,file:resolve(dirname(manifest),item.file)}));
 test('real PDF corpus complete-line and variation-attachment benchmark',async({page},testInfo)=>{

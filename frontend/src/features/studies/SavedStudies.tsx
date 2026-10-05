@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useGetStudiesQuery, useSaveStudyMutation, useDeleteStudyMutation } from './store/chessApi';
-import type { SavedStudy, StudyInput } from './apiClient';
-import { friendlyError } from './api';
+import { useGetStudiesQuery, useSaveStudyMutation, useDeleteStudyMutation } from '../../store/chessApi';
+import type { SavedStudy, StudyInput } from '../../lib/apiClient';
+import { friendlyError } from '../../lib/api';
 
 type Props = { owner: string; snapshot: Omit<StudyInput,'title'>; onLoad: (study: SavedStudy) => void; disabled?: boolean };
 export default function SavedStudies({owner,snapshot,onLoad,disabled=false}: Props) {

@@ -1,5 +1,5 @@
 import { requestJson } from './api';
-import type { components } from './generated/api';
+import type { components } from '../generated/api';
 
 export type PlayerSummary = components['schemas']['PlayerSummary'];
 export type MoveRequest = components['schemas']['MovePredictionRequest'];

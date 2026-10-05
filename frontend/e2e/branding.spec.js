@@ -61,7 +61,7 @@ test('unknown routes retain navigation and a useful recovery screen',async({page
 });
 
 test('a failed tool download preserves navigation and recovers on another route',async({page})=>{
-  await page.route('**/src/Dashboard.jsx',route=>route.abort('failed'));
+  await page.route('**/src/features/prediction/Dashboard.jsx',route=>route.abort('failed'));
   await page.route('**/api/v1/studies',route=>route.fulfill({headers:{'Access-Control-Allow-Origin':'*'},json:{studies:[]}}));
   await page.goto('/predict');
   await expect(page.getByRole('heading',{name:'This page could not open'})).toBeVisible();

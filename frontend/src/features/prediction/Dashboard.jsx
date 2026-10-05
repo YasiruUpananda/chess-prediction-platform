@@ -12,21 +12,21 @@ import {
   setStrategyAnalysis,
   applyMovePrediction,
   setError,
-} from './store/chessSlice';
-import ResponsiveBoard from './ResponsiveBoard';
+} from '../../store/chessSlice';
+import ResponsiveBoard from '../../components/ResponsiveBoard';
 import ReportContent from './ReportContent';
-import SavedStudies from './SavedStudies';
+import SavedStudies from '../studies/SavedStudies';
 import { reportMarkdown, downloadText } from './reportExport';
 import { Chess } from 'chess.js';
-import { useSession } from './sessionContext';
-import { authenticatedRequest, friendlyError } from './api';
-import { predictMove } from './apiClient';
-import { useGetPlayersQuery } from './store/chessApi';
-import { createRequestGate } from './requestGate';
+import { useSession } from '../auth/sessionContext';
+import { authenticatedRequest, friendlyError } from '../../lib/api';
+import { predictMove } from '../../lib/apiClient';
+import { useGetPlayersQuery } from '../../store/chessApi';
+import { createRequestGate } from '../../lib/requestGate';
 import { readReportStream } from './reportStream';
-import { restoreGame, gameSnapshot, formatEvaluation } from './gameHistory';
+import { restoreGame, gameSnapshot, formatEvaluation } from '../../lib/gameHistory';
 import { statisticText } from './statisticText';
-import './App.css'; 
+import '../../styles/App.css';
 
 const EMPTY_PLAYERS = [];
 const reportSections = [
@@ -47,7 +47,7 @@ function Statistics({ statistics, evidence = null }) {
 
 export default function Dashboard() {
   const dispatch = useDispatch();
-  const store = /** @type {typeof import('./store/store').store} */ (useStore());
+  const store = /** @type {typeof import('../../store/store').store} */ (useStore());
   const moveGate = useMemo(() => createRequestGate(), []);
   const strategyGate = useMemo(() => createRequestGate(), []);
   const [movePending, setMovePending] = useState(false);
@@ -64,7 +64,7 @@ export default function Dashboard() {
 
   // --- Read Global State from Redux ---
   const { fen, opponentName, strategyAnalysis, predictedMove, loading, error, supportingGames, availableGames, initialFen, moves } = useSelector(
-    (/** @type {ReturnType<typeof import('./store/store').store.getState>} */ state) => state.chess
+    (/** @type {ReturnType<typeof import('../../store/store').store.getState>} */ state) => state.chess
   );
 
   // --- Local Game & Form States ---

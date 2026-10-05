@@ -1,5 +1,5 @@
 ﻿import { Link } from 'react-router-dom';
-import { useSession } from './sessionContext';
+import { useSession } from '../features/auth/sessionContext';
 
 export default function Home() {
   const { state, requestSession } = useSession();

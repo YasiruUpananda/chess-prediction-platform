@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuthContext } from '@asgardeo/auth-react';
 import { SessionContext } from './sessionContext';
-import { configureAuthentication, AUTH_RECOVERY_KEY } from './api';
+import { configureAuthentication, AUTH_RECOVERY_KEY } from '../../lib/api';
 
 const config = {
   signInRedirectURL: import.meta.env.VITE_ASGARDEO_SIGN_IN_REDIRECT_URL || window.location.origin,

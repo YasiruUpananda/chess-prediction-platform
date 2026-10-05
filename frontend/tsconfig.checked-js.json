@@ -11,8 +11,8 @@
     ]
   },
   "include": [
-    "src/chessPdf.js",
-    "src/Dashboard.jsx",
-    "src/PdfReader.jsx"
+    "src/features/reader/chessPdf.js",
+    "src/features/prediction/Dashboard.jsx",
+    "src/features/reader/PdfReader.jsx"
   ]
 }

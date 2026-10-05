@@ -1,7 +1,7 @@
 import { Profiler } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
-import ReportContent from '../src/ReportContent';
+import ReportContent from '../src/features/prediction/ReportContent';
 import Baseline from './compiler-baseline';
 
 // A stress fixture isolates rendering from API latency. No real games or users.

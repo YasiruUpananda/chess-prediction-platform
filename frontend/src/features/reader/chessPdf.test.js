@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
 import { parseChessText, extractSanMoves, textBlocks, customPieceSymbols, suggestPieceMappings, applyPieceMappings, parseTextBlocks, fontSymbols, symbolKey, resolveLineAnchor } from './chessPdf.js';
-import { restoreGame, gameSnapshot } from './gameHistory.js';
+import { restoreGame, gameSnapshot } from '../../lib/gameHistory.js';
 
 const bookLine='1.c4 c6 2.e4 d5 3.exd5 ♘f6 4.♘c3 cxd5 5.cxd5 ♘xd5 6.♘f3 e6 7.♗c4 ♘c6 8.0-0 ♗e7 9.d4 0-0 10.♖e1 ♘f6';
 test('commentary resumes the game and prose alternatives attach to their earlier positions',()=>{

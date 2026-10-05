@@ -1,6 +1,6 @@
 import { createApi } from '@reduxjs/toolkit/query/react';
-import { friendlyError, requestJson } from '../api';
-import type { PlayerSummary, SavedStudy, StudyInput } from '../apiClient';
+import { friendlyError, requestJson } from '../lib/api';
+import type { PlayerSummary, SavedStudy, StudyInput } from '../lib/apiClient';
 import type { BaseQueryFn } from '@reduxjs/toolkit/query';
 
 const baseQuery: BaseQueryFn<string | {url: string; method?: string; body?: StudyInput}, unknown, { status: number | string; error: string }> = async (args, api) => {

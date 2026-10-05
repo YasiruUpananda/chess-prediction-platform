@@ -1,19 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Field } from './ui';
+import { Button, Field } from '../../components/ui';
 import ReaderMoves from './ReaderMoves';
-import './reader.css';
-import ResponsiveBoard from './ResponsiveBoard';
-import SavedStudies from './SavedStudies';
+import '../../styles/reader.css';
+import ResponsiveBoard from '../../components/ResponsiveBoard';
+import SavedStudies from '../studies/SavedStudies';
 import { Chess } from 'chess.js';
 import { parseChessText, EXTRACTION_VERSION, fontSymbols, parseTextBlocks, suggestPieceMappings, resolveLineAnchor } from './chessPdf';
 import { readSession, writeSession, deleteSession } from './readingSession';
 import PieceSymbolPreview from './PieceSymbolPreview';
 import DocumentLibrary from './DocumentLibrary';
 import {restoreReadingSession, compactPageCache} from './readerSessionModel';
-import { restoreGame, gameSnapshot } from './gameHistory';
+import { restoreGame, gameSnapshot } from '../../lib/gameHistory';
 import { buildBookTree, nodeAt, continuation, bookMoveLabels, mergeBookTrees, treeNotation, addStudyMove, bookMainPath, exportBookPgn } from './bookReplay';
-import { useSession } from './sessionContext';
-import { friendlyError } from './api';
+import { useSession } from '../auth/sessionContext';
+import { friendlyError } from '../../lib/api';
 import {extractDocumentPage} from './readerExtraction';
 const PdfDocumentView = lazy(() => import('./PdfDocumentView'));
 

@@ -1,14 +1,14 @@
 import { lazy, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Outlet } from 'react-router-dom';
-import { useSession } from './sessionContext';
-import AuthBoundary from './AuthBoundary';
-import AuthenticationRecovery from './AuthenticationRecovery';
-import SiteLayout from './SiteLayout';
-import PageBoundary from './PageBoundary';
+import { useSession } from '../features/auth/sessionContext';
+import AuthBoundary from '../features/auth/AuthBoundary';
+import AuthenticationRecovery from '../features/auth/AuthenticationRecovery';
+import SiteLayout from '../components/SiteLayout';
+import PageBoundary from '../components/PageBoundary';
 
-const Home = lazy(() => import('./Home'));
-const Dashboard = lazy(() => import('./Dashboard'));
-const PdfReader = lazy(() => import('./PdfReader'));
+const Home = lazy(() => import('../pages/Home'));
+const Dashboard = lazy(() => import('../features/prediction/Dashboard'));
+const PdfReader = lazy(() => import('../features/reader/PdfReader'));
 const WorkspaceProvider = lazy(() => import('./WorkspaceProvider'));
 
 function ProtectedArea() {

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import { SessionContext } from './sessionContext';
-import { AUTH_RECOVERY_KEY } from './api';
+import { AUTH_RECOVERY_KEY } from '../../lib/api';
 
 const SdkSession = lazy(() => import('./SdkSession'));
 

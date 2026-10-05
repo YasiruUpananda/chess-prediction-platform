@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {Chess} from 'chess.js';
-import {parseChessText,parseTextBlocks,textBlocks} from '../src/chessPdf.js';
-import {gradePdfLines} from '../src/pdfBenchmark.js';
+import {parseChessText,parseTextBlocks,textBlocks} from '../src/features/reader/chessPdf.js';
+import {gradePdfLines} from '../src/features/reader/pdfBenchmark.js';
 const corpus=JSON.parse(readFileSync(new URL('../benchmarks/pdf/fixtures.json',import.meta.url),'utf8'));
 const cases=corpus.cases.map(sample=>({name:sample.name,...gradePdfLines(
   sample.items?parseTextBlocks(textBlocks(sample.items,sample.pageWidth,1),new Chess().fen()):

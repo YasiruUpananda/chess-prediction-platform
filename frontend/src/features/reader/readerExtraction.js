@@ -1,6 +1,6 @@
 import {textBlocks,regionBlocks} from './chessPdf';
-import {waitForPoll} from './api';
-import {extractPageImage,getOcrJob} from './apiClient';
+import {waitForPoll} from '../../lib/api';
+import {extractPageImage,getOcrJob} from '../../lib/apiClient';
 
 export async function extractDocumentPage({pdfDocument,pageNumber,selection,forceOCR,ocrMode,getAccessToken,controller,onStatus,onRender}) {
   let canvas,renderTask,extracted;
