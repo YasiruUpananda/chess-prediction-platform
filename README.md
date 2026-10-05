@@ -2,8 +2,6 @@
 
 See the [documentation index](docs/README.md) and [repository structure](docs/architecture/REPOSITORY_STRUCTURE.md) for feature ownership, operations, and verification commands.
 
-For an in-depth explanation of the implementation, read the [project report](docs/project/PROJECT_DEEP_DIVE.md), [architecture diagrams](docs/project/ARCHITECTURE.md), and [100 interview questions](docs/project/INTERVIEW_QUESTIONS.md).
-
 Reader preservation, identity migration, and regression gates: [READER_PRESERVATION.md](./docs/features/READER_PRESERVATION.md).
 Off-host bucket setup: [BACKUP_SETUP.md](./docs/operations/BACKUP_SETUP.md).
 

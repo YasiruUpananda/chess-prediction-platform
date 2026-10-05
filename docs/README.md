@@ -11,9 +11,6 @@ Start with the [repository README](../README.md) for local setup. Commands in th
 
 ## Architecture and development
 
-- [Project deep dive](project/PROJECT_DEEP_DIVE.md): implementation, ML/RAG explanations, technology decisions, OOP, data structures, and source-line references.
-- [Architecture diagrams](project/ARCHITECTURE.md): system, request flows, ingestion, PDF processing, and database relationships.
-- [100 interview questions](project/INTERVIEW_QUESTIONS.md): detailed answers and limitations to explain confidently.
 - [Repository structure](architecture/REPOSITORY_STRUCTURE.md): file ownership, entry points, and checks.
 - [Repository quality](architecture/REPOSITORY_QUALITY.md): CI, migrations, and dataset preparation.
 - [Technology adoption](architecture/TECHNOLOGY_ADOPTION.md): telemetry, API contracts, and profiling.
