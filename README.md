@@ -1,7 +1,9 @@
 # Neuro Chess
 
-Reader preservation, identity migration, and regression gates: [READER_PRESERVATION.md](READER_PRESERVATION.md).
-Off-host bucket setup: [BACKUP_SETUP.md](BACKUP_SETUP.md).
+See the [documentation index](docs/README.md) and [repository structure](docs/architecture/REPOSITORY_STRUCTURE.md) for feature ownership, operations, and verification commands.
+
+Reader preservation, identity migration, and regression gates: [READER_PRESERVATION.md](./docs/features/READER_PRESERVATION.md).
+Off-host bucket setup: [BACKUP_SETUP.md](./docs/operations/BACKUP_SETUP.md).
 
 Neuro Chess combines opponent move analysis, chess strategy search, and a PDF chess book reader with move extraction. The Vite React app in `frontend/` is the web client. The FastAPI service and ingestion worker live in `services/ml-engine/`.
 
@@ -54,7 +56,7 @@ OCR submission returns HTTP 202 with `job_id` and `status`. Poll `/api/v1/ocr-jo
 
 RabbitMQ data and embedding model downloads use persistent volumes. Check `docker compose ps`, worker logs and `/ready`; `/health` remains API liveness. `/ready` returns HTTP 503 when PostgreSQL or either worker is unavailable, with a 45-second heartbeat grace period. Redis remains an optional cache. Move cache keys include a PostgreSQL dataset version advanced transactionally when ingestion publishes indexed games; new games immediately use different cache keys. The 60-second TTL bounds storage and transient results. Strategy caches already include evidence version, player, context, color, model and prompt version.
 
-See [BACKEND_OPERATIONS.md](BACKEND_OPERATIONS.md) for locked dependency groups, split images, pool sizing, per-user limits, benchmarks, restricted monitoring, backups and restore verification.
+See [BACKEND_OPERATIONS.md](./docs/operations/BACKEND_OPERATIONS.md) for locked dependency groups, split images, pool sizing, per-user limits, benchmarks, restricted monitoring, backups and restore verification.
 
 ## Checks
 
@@ -63,13 +65,13 @@ Run frontend checks from `frontend/`:
 ```powershell
 npm run lint
 npm run build
-node --test src/requestGate.test.js
+npm test
 ```
 
 Check PostgreSQL from the running API container:
 
 ```powershell
-docker compose exec ml-engine python test_db.py
+docker compose exec ml-engine python -m tools.check_database
 ```
 
 Run reliability regression checks (integration tests require the running OCR worker and create/clean up only test-owned records):
@@ -93,12 +95,12 @@ docker compose run --rm -e RUN_INTEGRATION_TESTS=1 backend-tests
 - `DB_POOL_MAX` and `VECTOR_DB_POOL_MAX` bound connections per API process. Workers use smaller pools.
 - `RATE_REPORTS_PER_MINUTE`, `RATE_OCR_PER_MINUTE`, `RATE_MOVES_PER_MINUTE`, and `RATE_INGESTION_PER_MINUTE` configure shared per-user admission limits.
 
-See [Technology adoption](TECHNOLOGY_ADOPTION.md) for local OpenTelemetry/Jaeger,
+See [Technology adoption](./docs/architecture/TECHNOLOGY_ADOPTION.md) for local OpenTelemetry/Jaeger,
 generated TypeScript API contracts, React Compiler profiling and optional HNSW retrieval.
-See [Repository quality](REPOSITORY_QUALITY.md) for CI, explicit migrations,
+See [Repository quality](./docs/architecture/REPOSITORY_QUALITY.md) for CI, explicit migrations,
 private deployment networking, bounded report references, chronological evaluation,
 and the Sri Lankan ChessBase PGN import workflow.
-See [Implementation status and measurements](IMPLEMENTATION_STATUS.md) for saved
+See [Implementation status and measurements](./docs/reviews/IMPLEMENTATION_STATUS.md) for saved
 studies, exports, Prometheus queries, Web Vitals targets and regression/load-test commands.
-See [Branding and source review](BRANDING_REVIEW.md) for the NeuroChess visual system,
+See [Branding and source review](./docs/reviews/BRANDING_REVIEW.md) for the NeuroChess visual system,
 shared navigation, accessibility checks and source corrections.

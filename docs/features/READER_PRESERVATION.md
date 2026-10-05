@@ -72,4 +72,4 @@ Windows/Linux visual baselines cover dark/paper themes and drawers on desktop/mo
 Review screenshot changes before updating baselines. Axe checks serious/critical WCAG
 findings; automated scans do not replace keyboard and screen-reader assessment.
 
-See [BACKUP_SETUP.md](BACKUP_SETUP.md) for manual bucket setup and restore checks.
+See [BACKUP_SETUP.md](../operations/BACKUP_SETUP.md) for manual bucket setup and restore checks.

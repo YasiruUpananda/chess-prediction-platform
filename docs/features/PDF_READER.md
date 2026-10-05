@@ -10,7 +10,7 @@ Choose **Warm paper** for a light reading workspace. Zoom changes the displayed 
 
 **Extraction tools** holds the starting FEN, font-specific symbol mappings, raw extracted text, OCR layout choices, and extraction diagnostics. Escape closes the drawer. **Notes** keeps review/correction and saved-study controls; **More board controls** contains manual move input, promotion, undo, flip, reset, and PGN export.
 
-Shared visual tokens and control primitives live in `frontend/src/designSystem.css` and `frontend/src/ui.jsx`. Reader layout is owned by `frontend/src/reader.css`; keep reader selectors out of `App.css` and `brand.css` to avoid competing overrides. Preserve the shared 44-pixel control height and visible keyboard focus when adding controls.
+Shared visual tokens and control primitives live in `frontend/src/styles/designSystem.css` and `frontend/src/components/ui.jsx`. Reader layout is owned by `frontend/src/styles/reader.css`; keep reader selectors out of `App.css` and `brand.css` to avoid competing overrides. Preserve the shared 44-pixel control height and visible keyboard focus when adding controls.
 
 ## Structure and game history
 

@@ -22,7 +22,7 @@ For local development with uv:
 ```powershell
 cd services/ml-engine
 uv sync --frozen --extra api --extra embeddings --group test
-uv run --frozen --extra api --extra embeddings --group test python -m unittest test_backend_efficiency -v
+uv run --frozen --extra api --extra embeddings --group test python -m unittest tests.test_backend_efficiency -v
 ```
 
 The normal stack starts with `docker compose up -d --build`. API and ingestion

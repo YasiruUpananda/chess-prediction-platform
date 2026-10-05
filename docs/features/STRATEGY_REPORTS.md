@@ -19,10 +19,10 @@ Embedding initialization runs in the background at API startup. Initialization i
 Validation commands:
 
 ```
-docker compose exec -T ml-engine python -m unittest test_strategy_reports test_reliability test_prediction_quality
-docker compose exec -T -e RUN_INTEGRATION_TESTS=1 ml-engine python -m unittest test_reliability_integration
+docker compose run --rm backend-tests python -m unittest tests.test_strategy_reports tests.test_reliability tests.test_prediction_quality
+docker compose run --rm -e RUN_INTEGRATION_TESTS=1 backend-tests python -m unittest tests.test_reliability_integration
 cd frontend
 npm run lint
 npm run build
-node --test src/requestGate.test.js src/gameHistory.test.js src/reportStream.test.js
+node --test src/lib/requestGate.test.js src/lib/gameHistory.test.js src/features/prediction/reportStream.test.js
 ```

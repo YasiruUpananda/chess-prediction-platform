@@ -17,7 +17,7 @@ docker compose build migrate
 docker compose run --rm migrate
 ```
 
-Compose waits for the migration job before API and worker startup. Outside Compose, run `python migrate.py apply` with the database URL configured. Service startup checks the migration ledger without creating tables or backfilling rows. `python migrate.py check` performs only the readiness check. Vector schema and collection bootstrap now belong to migration 0003; the pinned LangChain adapter performs no DDL. See [READER_PRESERVATION.md](READER_PRESERVATION.md) for runtime roles and identity adoption.
+Compose waits for the migration job before API and worker startup. Outside Compose, run `python migrate.py apply` with the database URL configured. Service startup checks the migration ledger without creating tables or backfilling rows. `python migrate.py check` performs only the readiness check. Vector schema and collection bootstrap now belong to migration 0003; the pinned LangChain adapter performs no DDL. See [READER_PRESERVATION.md](../features/READER_PRESERVATION.md) for runtime roles and identity adoption.
 
 Migrations use an advisory transaction lock, a version/checksum ledger, and one transaction. The initial migration adopts existing tables additively; position-key backfill is recorded once and processes batches of 500. Editing an applied migration fails validation. Add a new numbered migration instead. Roll back application code only to a version compatible with the deployed schema; destructive down migrations are deliberately absent.
 
@@ -37,7 +37,7 @@ The dashboard's **Browse all references** uses authenticated pagination through 
 
 ## Prediction evaluation and Sri Lankan ChessBase data
 
-The saved `prediction-evaluation.json` remains the historical hash-split result. New evaluation defaults to chronological train/validation/test periods, keeps equal dates together, excludes incomplete dates, deduplicates games, tunes the history prior only on validation log loss, and reports test accuracy/calibration plus historical-evidence coverage. The tested prior is not automatically promoted to production.
+The saved `services/ml-engine/benchmarks/prediction-evaluation.json` remains the historical hash-split result. New evaluation defaults to chronological train/validation/test periods, keeps equal dates together, excludes incomplete dates, deduplicates games, tunes the history prior only on validation log loss, and reports test accuracy/calibration plus historical-evidence coverage. The tested prior is not automatically promoted to production.
 
 `HISTORY_PRIOR_STRENGTH` lets an operator deploy a reviewed validation choice; the default remains 20. Move-cache identity includes this strength so changing it cannot reuse an older weighting result.
 
