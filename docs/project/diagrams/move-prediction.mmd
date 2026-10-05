@@ -1,0 +1,35 @@
+sequenceDiagram
+  actor U as User
+  participant UI as Dashboard and request gate
+  participant API as FastAPI
+  participant DB as PostgreSQL
+  participant C as Redis
+  participant E as Stockfish pool
+  U->>UI: Play legal move
+  UI->>UI: Snapshot initial FEN, moves, position and revision
+  UI->>API: POST predict-move with bearer JWT
+  API->>API: Verify token and validate request
+  API->>DB: Atomic per-user admission
+  API->>API: Reconstruct history, validate board and terminal state
+  API->>DB: Read dataset version
+  API->>C: Versioned response lookup
+  alt Valid cache hit
+    C-->>API: Validated response
+  else Cache miss or Redis unavailable
+    API->>API: Score legal moves and form softmax prior
+    API->>DB: First matching position per game for player
+    DB-->>API: Historical counts or lookup failure
+    API->>API: Pseudocount smoothing, rank likely moves
+    API->>E: Evaluate strongest and selected moves
+    E-->>API: Evaluation, busy or unavailable
+    opt Valid version and available engine
+      API->>C: Best-effort cache write, 60 seconds
+    end
+  end
+  API-->>UI: Move, evidence counts, candidates and engine result
+  UI->>UI: Verify request identity, FEN, opponent and revision
+  alt Response still current
+    UI->>UI: Guarded reducer applies automatic reply
+  else Obsolete response
+    UI->>UI: Discard
+  end

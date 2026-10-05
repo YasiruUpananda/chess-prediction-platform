@@ -1,0 +1,31 @@
+sequenceDiagram
+  participant UI as Dashboard
+  participant API as NDJSON route
+  participant R as Strategy orchestrator
+  participant DB as SQL evidence
+  participant Cache as Redis
+  participant V as MiniLM and pgvector
+  participant G as Gemini REST
+  UI->>API: Player, context, color and bearer JWT
+  API->>R: Admit report within process capacity
+  R-->>UI: Progress
+  R->>DB: Count indexed evidence and compute/reuse statistics
+  alt Fewer than three eligible games
+    R-->>UI: Insufficient-evidence event
+  else Sufficient admission sample
+    R-->>UI: Verified statistics and sample size
+    R->>Cache: Versioned report lookup
+    alt Cached validated report
+      Cache-->>R: Report
+    else Cache miss
+      R->>V: Embed context, retrieve at most six eligible player games
+      V-->>R: Documents and metadata
+      R->>R: Verify player, IDs, PGN and prompt bounds
+      R->>G: Evidence JSON and response schema
+      G-->>R: Complete JSON response
+      R->>R: Validate schema, references and interpretation restrictions
+      R->>Cache: Best-effort one-hour cache write
+    end
+    R-->>UI: Complete report and references
+  end
+  R->>R: Release slot after underlying work finishes

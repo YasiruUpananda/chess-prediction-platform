@@ -1,0 +1,21 @@
+flowchart TD
+  Request["Authorized PGN filename"] --> Confirm["Persistent publish with confirmation"]
+  Confirm --> Queue["Main queue"]
+  Queue --> Parse["Worker parses PGN and calculates canonical identity"]
+  Parse --> Rows["Transaction: provenance, players, unique move rows"]
+  Rows --> Vector["Upsert full-game embedding under stable game ID"]
+  Vector --> Indexed["Mark indexed and advance data version"]
+  Indexed --> Ack["Acknowledge original delivery"]
+  Parse -. failure .-> Decide["Permanent failure or attempt limit?"]
+  Rows -. failure .-> Decide
+  Vector -. failure .-> Decide
+  Decide -->|"Transient and attempts remain"| Retry["Confirmed retry publish"]
+  Decide -->|"Invalid input or exhausted"| Dead["Confirmed dead-letter publish"]
+  Retry --> Ack
+  Dead --> Ack
+  Retry --> Delay["Consumer waits before retry"]
+  Delay --> Parse
+  Retry -. publish fails .-> Unacked["Leave original unacknowledged"]
+  Dead -. publish fails .-> Unacked
+  Unacked --> Recovery["Broker redelivery after recovery"]
+  Recovery --> Parse
